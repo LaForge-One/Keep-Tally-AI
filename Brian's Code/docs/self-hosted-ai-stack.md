@@ -155,12 +155,19 @@ The helper follows LocalAI's current model flow:
 Default first-test model config:
 
 ```env
-LOCALAI_MODEL_CONFIG_URL=github:mudler/LocalAI/gallery/gpt4all-j.yaml
+LOCALAI_MODEL_CONFIG_URL=llama-3.2-1b-instruct:q4_k_m
 LOCALAI_MODEL_INSTALL_NAME=local-llm
 ```
 
 LocalAI is bound to `127.0.0.1:8080` for host-side validation, and remains
 internal-only to other Docker services through `http://localai:8080`.
+
+Why not `gpt4all-j`:
+
+LocalAI can list a model even when its backend cannot load. If completion fails
+with `backend not found: .../gpt4all-j`, remove that model config and reinstall
+with a GGUF/`llama-cpp` gallery model such as `llama-3.2-1b-instruct:q4_k_m`.
+The helper installs/checks `llama-cpp` before applying the model.
 
 If LocalAI logs `failed loading galleries` with an invalid JSON message, pull
 the latest repo changes and recreate the LocalAI container. Older `.env.ai`

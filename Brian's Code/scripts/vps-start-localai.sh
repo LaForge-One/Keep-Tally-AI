@@ -73,6 +73,14 @@ done
 
 curl -fsS "$LOCALAI_URL/readyz" >/dev/null
 
+echo "Ensuring LocalAI llama-cpp backend is available ..."
+docker compose \
+  -f "$COMPOSE_BASE" \
+  -f "$COMPOSE_AI" \
+  --env-file "$ENV_PRODUCTION" \
+  --env-file "$ENV_AI" \
+  exec localai local-ai backends install llama-cpp || true
+
 echo "Installing LocalAI model '$LOCALAI_MODEL_INSTALL_NAME' from '$LOCALAI_MODEL_CONFIG_URL' ..."
 apply_response="$(
   curl -fsS "$LOCALAI_URL/models/apply" \
