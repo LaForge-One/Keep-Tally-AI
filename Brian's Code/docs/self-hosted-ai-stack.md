@@ -76,6 +76,53 @@ Use the `automation` compose profile only when needed.
 
 ## Deployment Modes
 
+### Recommended VPS First Run: Ollama Direct
+
+This is the fastest path now that Docker is installed on the VPS. It runs Ollama
+as KeepTally's OpenAI-compatible API and avoids LocalAI model-definition setup
+for the first field test.
+
+```sh
+cp .env.ollama-ai.example .env.ai
+# edit .env.ai and replace N8N_ENCRYPTION_KEY before enabling n8n
+
+docker compose \
+  -f docker-compose.vps.example.yml \
+  -f docker-compose.ollama-ai.example.yml \
+  --env-file .env.production \
+  --env-file .env.ai \
+  up -d ollama
+
+docker compose \
+  -f docker-compose.vps.example.yml \
+  -f docker-compose.ollama-ai.example.yml \
+  --env-file .env.production \
+  --env-file .env.ai \
+  exec ollama ollama pull qwen2.5:3b
+
+docker compose \
+  -f docker-compose.vps.example.yml \
+  -f docker-compose.ollama-ai.example.yml \
+  --env-file .env.production \
+  --env-file .env.ai \
+  up -d keeptally
+```
+
+Or use the helper:
+
+```sh
+chmod +x scripts/vps-start-ai.sh
+./scripts/vps-start-ai.sh
+```
+
+KeepTally points at:
+
+```env
+AI_INTEGRATIONS_OPENAI_BASE_URL=http://ollama:11434/v1
+AI_INTEGRATIONS_OPENAI_API_KEY=${OLLAMA_OPENAI_API_KEY}
+AI_TEXT_MODEL=qwen2.5:3b
+```
+
 ### KeepTally + LocalAI Only
 
 ```sh
