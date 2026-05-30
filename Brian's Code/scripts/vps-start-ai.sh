@@ -52,7 +52,7 @@ docker compose \
   -f "$COMPOSE_AI" \
   --env-file "$ENV_PRODUCTION" \
   --env-file "$ENV_AI" \
-  up -d keeptally
+  up -d --build keeptally
 
 docker compose \
   -f "$COMPOSE_BASE" \
