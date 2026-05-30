@@ -31,8 +31,8 @@ services:
       API_KEY: ${LOCALAI_API_KEY:-keeptally-local-ai}
       THREADS: ${LOCALAI_THREADS:-4}
       CONTEXT_SIZE: ${LOCALAI_CONTEXT_SIZE:-2048}
-      GALLERIES: ${LOCALAI_GALLERIES:-[{"name":"localai","url":"github:mudler/LocalAI/gallery/index.yaml"}]}
-      PRELOAD_MODELS: ${LOCALAI_PRELOAD_MODELS:-[]}
+      GALLERIES: '[{"name":"localai","url":"github:mudler/LocalAI/gallery/index.yaml"}]'
+      PRELOAD_MODELS: "[]"
     volumes:
       - localai-models:/models
     ports:

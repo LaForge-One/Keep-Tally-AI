@@ -162,6 +162,11 @@ LOCALAI_MODEL_INSTALL_NAME=local-llm
 LocalAI is bound to `127.0.0.1:8080` for host-side validation, and remains
 internal-only to other Docker services through `http://localai:8080`.
 
+If LocalAI logs `failed loading galleries` with an invalid JSON message, pull
+the latest repo changes and recreate the LocalAI container. Older `.env.ai`
+files may include `LOCALAI_GALLERIES` or `LOCALAI_PRELOAD_MODELS`; remove those
+lines because the compose overlay now passes valid JSON directly.
+
 ### Add Admin Model UI
 
 ```sh

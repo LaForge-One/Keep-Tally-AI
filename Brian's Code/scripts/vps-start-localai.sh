@@ -9,6 +9,12 @@ LOCALAI_HOST="${LOCALAI_HOST:-127.0.0.1}"
 LOCALAI_PORT="${LOCALAI_PORT:-8080}"
 LOCALAI_URL="http://${LOCALAI_HOST}:${LOCALAI_PORT}"
 
+read_env_value() {
+  local name="$1"
+  local file="$2"
+  grep -E "^${name}=" "$file" | tail -n 1 | cut -d= -f2-
+}
+
 if ! command -v docker >/dev/null 2>&1; then
   echo "Docker is not installed or not available on PATH." >&2
   exit 1
@@ -40,15 +46,14 @@ if [ ! -f "$ENV_AI" ]; then
   echo "Created $ENV_AI from .env.ai.example."
 fi
 
-set -a
-# shellcheck disable=SC1090
-. "$ENV_AI"
-set +a
-
+LOCALAI_PORT="$(read_env_value "LOCALAI_PORT" "$ENV_AI")"
 LOCALAI_PORT="${LOCALAI_PORT:-8080}"
 LOCALAI_URL="http://${LOCALAI_HOST}:${LOCALAI_PORT}"
+LOCALAI_API_KEY="$(read_env_value "LOCALAI_API_KEY" "$ENV_AI")"
 LOCALAI_API_KEY="${LOCALAI_API_KEY:-keeptally-local-ai}"
+LOCALAI_MODEL_CONFIG_URL="$(read_env_value "LOCALAI_MODEL_CONFIG_URL" "$ENV_AI")"
 LOCALAI_MODEL_CONFIG_URL="${LOCALAI_MODEL_CONFIG_URL:-github:mudler/LocalAI/gallery/gpt4all-j.yaml}"
+LOCALAI_MODEL_INSTALL_NAME="$(read_env_value "LOCALAI_MODEL_INSTALL_NAME" "$ENV_AI")"
 LOCALAI_MODEL_INSTALL_NAME="${LOCALAI_MODEL_INSTALL_NAME:-local-llm}"
 
 docker compose \
@@ -75,13 +80,17 @@ apply_response="$(
     -H "Content-Type: application/json" \
     -d "{\"url\":\"$LOCALAI_MODEL_CONFIG_URL\",\"name\":\"$LOCALAI_MODEL_INSTALL_NAME\"}"
 )"
+echo "$apply_response"
 
 job_id="$(printf '%s' "$apply_response" | sed -n 's/.*"uuid"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
 if [ -n "$job_id" ]; then
   echo "LocalAI model job: $job_id"
   for _ in $(seq 1 900); do
     job_response="$(curl -fsS "$LOCALAI_URL/models/jobs/$job_id" -H "Authorization: Bearer $LOCALAI_API_KEY")"
-    printf '%s\n' "$job_response" | grep -q '"processed"[[:space:]]*:[[:space:]]*true' && break
+    if printf '%s\n' "$job_response" | grep -q '"processed"[[:space:]]*:[[:space:]]*true'; then
+      echo "$job_response"
+      break
+    fi
     sleep 2
   done
 fi
