@@ -26,12 +26,17 @@ services:
     restart: unless-stopped
     environment:
       MODELS_PATH: /models
+      LOCALAI_MODELS_PATH: /models
       DEBUG: ${LOCALAI_DEBUG:-false}
       API_KEY: ${LOCALAI_API_KEY:-keeptally-local-ai}
       THREADS: ${LOCALAI_THREADS:-4}
       CONTEXT_SIZE: ${LOCALAI_CONTEXT_SIZE:-2048}
+      GALLERIES: ${LOCALAI_GALLERIES:-[{"name":"localai","url":"github:mudler/LocalAI/gallery/index.yaml"}]}
+      PRELOAD_MODELS: ${LOCALAI_PRELOAD_MODELS:-[]}
     volumes:
       - localai-models:/models
+    ports:
+      - "127.0.0.1:${LOCALAI_PORT:-8080}:8080"
     expose:
       - "8080"
     healthcheck:

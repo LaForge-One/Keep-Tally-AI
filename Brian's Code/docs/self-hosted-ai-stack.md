@@ -127,7 +127,8 @@ AI_TEXT_MODEL=qwen2.5:3b
 
 ```sh
 cp .env.ai.example .env.ai
-# edit LOCALAI_API_KEY and model names
+# edit LOCALAI_API_KEY and model names, or let scripts/vps-start-localai.sh
+# create a random LOCALAI_API_KEY on first run
 docker compose \
   -f docker-compose.vps.example.yml \
   -f docker-compose.ai.example.yml \
@@ -135,6 +136,31 @@ docker compose \
   --env-file .env.ai \
   up -d keeptally localai
 ```
+
+Preferred first-test helper:
+
+```sh
+chmod +x scripts/vps-start-localai.sh
+./scripts/vps-start-localai.sh
+```
+
+The helper follows LocalAI's current model flow:
+
+1. Start LocalAI.
+2. Wait for `/readyz`.
+3. Install a model through `/models/apply`.
+4. Confirm `/v1/models`.
+5. Start KeepTally pointed at `http://localai:8080/v1`.
+
+Default first-test model config:
+
+```env
+LOCALAI_MODEL_CONFIG_URL=github:mudler/LocalAI/gallery/gpt4all-j.yaml
+LOCALAI_MODEL_INSTALL_NAME=local-llm
+```
+
+LocalAI is bound to `127.0.0.1:8080` for host-side validation, and remains
+internal-only to other Docker services through `http://localai:8080`.
 
 ### Add Admin Model UI
 
