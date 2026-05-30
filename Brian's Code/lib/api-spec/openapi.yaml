@@ -1,0 +1,493 @@
+openapi: 3.1.0
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.1.0
+  description: KeepTally inventory tracking API
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: items
+    description: Inventory item operations
+  - name: history
+    description: Change history operations
+  - name: command
+    description: Natural language commands
+  - name: dashboard
+    description: Dashboard summaries
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      description: Returns server health status
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+  /items:
+    get:
+      operationId: listItems
+      tags: [items]
+      summary: List all inventory items
+      parameters:
+        - in: query
+          name: location
+          required: false
+          schema:
+            type: string
+          description: Filter by location name
+      responses:
+        "200":
+          description: A list of inventory items
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Item"
+    post:
+      operationId: createItem
+      tags: [items]
+      summary: Create an inventory item
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateItemBody"
+      responses:
+        "201":
+          description: Created item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Item"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /items/{id}:
+    get:
+      operationId: getItem
+      tags: [items]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Item"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      operationId: updateItem
+      tags: [items]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateItemBody"
+      responses:
+        "200":
+          description: Updated item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Item"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteItem
+      tags: [items]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /history:
+    get:
+      operationId: listHistory
+      tags: [history]
+      summary: List change history (most recent first)
+      parameters:
+        - in: query
+          name: itemId
+          required: false
+          schema:
+            type: integer
+          description: Filter by item id
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            default: 100
+      responses:
+        "200":
+          description: History entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/HistoryEntry"
+  /command:
+    post:
+      operationId: runCommand
+      tags: [command]
+      summary: Run a natural language inventory command
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CommandBody"
+      responses:
+        "200":
+          description: Command result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CommandResult"
+        "400":
+          description: Invalid command
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /restock:
+    get:
+      operationId: getRestockList
+      tags: [items]
+      summary: Items at or below par with units needed to refill
+      parameters:
+        - in: query
+          name: location
+          required: false
+          schema:
+            type: string
+          description: Filter by location name
+      responses:
+        "200":
+          description: Restock list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RestockList"
+  /dashboard/summary:
+    get:
+      operationId: getDashboardSummary
+      tags: [dashboard]
+      summary: High-level inventory summary
+      parameters:
+        - in: query
+          name: location
+          required: false
+          schema:
+            type: string
+          description: Filter summary by location name
+      responses:
+        "200":
+          description: Summary stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardSummary"
+components:
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+        - status
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error
+    Item:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        category:
+          type: string
+        quantity:
+          type: integer
+        parLevel:
+          type: integer
+        location:
+          type: string
+        lastUpdated:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - category
+        - quantity
+        - parLevel
+        - location
+        - lastUpdated
+        - createdAt
+    CreateItemBody:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+        category:
+          type: string
+          minLength: 1
+        quantity:
+          type: integer
+          minimum: 0
+        parLevel:
+          type: integer
+          minimum: 0
+        location:
+          type: string
+          minLength: 1
+      required:
+        - name
+        - category
+        - quantity
+        - parLevel
+        - location
+    UpdateItemBody:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+        category:
+          type: string
+          minLength: 1
+        quantity:
+          type: integer
+          minimum: 0
+        parLevel:
+          type: integer
+          minimum: 0
+        location:
+          type: string
+          minLength: 1
+    HistoryEntry:
+      type: object
+      properties:
+        id:
+          type: integer
+        itemId:
+          type: ["integer", "null"]
+        itemName:
+          type: string
+        action:
+          type: string
+          description: "create | update | delete | adjust | command"
+        field:
+          type: ["string", "null"]
+          description: Field that changed (e.g. quantity, name, location)
+        previousValue:
+          type: ["string", "null"]
+        newValue:
+          type: ["string", "null"]
+        note:
+          type: ["string", "null"]
+        source:
+          type: string
+          description: "ui | command"
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - itemName
+        - action
+        - source
+        - createdAt
+    CommandBody:
+      type: object
+      properties:
+        text:
+          type: string
+          minLength: 1
+      required:
+        - text
+    CommandAction:
+      type: object
+      properties:
+        kind:
+          type: string
+          description: "set | add | reduce | create | delete"
+        itemId:
+          type: ["integer", "null"]
+        itemName:
+          type: string
+        location:
+          type: ["string", "null"]
+        previousQuantity:
+          type: ["integer", "null"]
+        newQuantity:
+          type: ["integer", "null"]
+        delta:
+          type: ["integer", "null"]
+      required:
+        - kind
+        - itemName
+    CommandResult:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        action:
+          oneOf:
+            - $ref: "#/components/schemas/CommandAction"
+            - type: "null"
+      required:
+        - success
+        - message
+    RestockEntry:
+      type: object
+      properties:
+        item:
+          $ref: "#/components/schemas/Item"
+        unitsNeeded:
+          type: integer
+      required:
+        - item
+        - unitsNeeded
+    RestockList:
+      type: object
+      properties:
+        generatedAt:
+          type: string
+          format: date-time
+        totalItems:
+          type: integer
+        totalUnitsNeeded:
+          type: integer
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/RestockEntry"
+      required:
+        - generatedAt
+        - totalItems
+        - totalUnitsNeeded
+        - entries
+    DashboardSummary:
+      type: object
+      properties:
+        totalItems:
+          type: integer
+        totalUnits:
+          type: integer
+        belowParCount:
+          type: integer
+        outOfStockCount:
+          type: integer
+        locationsCount:
+          type: integer
+        categoriesCount:
+          type: integer
+        belowPar:
+          type: array
+          items:
+            $ref: "#/components/schemas/Item"
+        recentChanges:
+          type: array
+          items:
+            $ref: "#/components/schemas/HistoryEntry"
+        byCategory:
+          type: array
+          items:
+            type: object
+            properties:
+              category:
+                type: string
+              itemCount:
+                type: integer
+              totalUnits:
+                type: integer
+            required:
+              - category
+              - itemCount
+              - totalUnits
+        byLocation:
+          type: array
+          items:
+            type: object
+            properties:
+              location:
+                type: string
+              itemCount:
+                type: integer
+              totalUnits:
+                type: integer
+            required:
+              - location
+              - itemCount
+              - totalUnits
+      required:
+        - totalItems
+        - totalUnits
+        - belowParCount
+        - outOfStockCount
+        - locationsCount
+        - categoriesCount
+        - belowPar
+        - recentChanges
+        - byCategory
+        - byLocation

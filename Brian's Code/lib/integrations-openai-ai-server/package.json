@@ -1,0 +1,40 @@
+{
+  "name": "@workspace/integrations-openai-ai-server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "workspace": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./batch": {
+      "types": "./dist/batch/index.d.ts",
+      "workspace": "./src/batch/index.ts",
+      "default": "./src/batch/index.ts"
+    },
+    "./image": {
+      "types": "./dist/image/index.d.ts",
+      "workspace": "./src/image/index.ts",
+      "default": "./src/image/index.ts"
+    },
+    "./audio": {
+      "types": "./dist/audio/index.d.ts",
+      "workspace": "./src/audio/index.ts",
+      "default": "./src/audio/index.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc -b tsconfig.json --force"
+  },
+  "dependencies": {
+    "openai": "^6.27.0",
+    "p-limit": "^7.3.0",
+    "p-retry": "^7.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:"
+  }
+}

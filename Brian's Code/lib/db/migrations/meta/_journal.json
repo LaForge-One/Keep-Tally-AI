@@ -1,0 +1,55 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1777392000000,
+      "tag": "0000_baseline",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1777488000000,
+      "tag": "0001_foundational_multi_tenant",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1777574400000,
+      "tag": "0002_legacy_multi_tenant_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1777660800000,
+      "tag": "0003_multi_tenant_repair_checks",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1777747200000,
+      "tag": "0004_account_scoped_role_permissions",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1777919999000,
+      "tag": "0005_route_sheets",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1778006400000,
+      "tag": "0006_lookup_indexes",
+      "breakpoints": true
+    }
+  ]
+}

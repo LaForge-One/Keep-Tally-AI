@@ -1,0 +1,273 @@
+{
+  "id": "00000000-0000-0000-0000-000000000001",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.history": {
+      "name": "history",
+      "schema": "",
+      "columns": {
+        "id": { "name": "id", "type": "serial", "primaryKey": true, "notNull": true },
+        "item_id": { "name": "item_id", "type": "integer", "primaryKey": false, "notNull": false },
+        "item_name": { "name": "item_name", "type": "text", "primaryKey": false, "notNull": true },
+        "action": { "name": "action", "type": "text", "primaryKey": false, "notNull": true },
+        "field": { "name": "field", "type": "text", "primaryKey": false, "notNull": false },
+        "previous_value": { "name": "previous_value", "type": "text", "primaryKey": false, "notNull": false },
+        "new_value": { "name": "new_value", "type": "text", "primaryKey": false, "notNull": false },
+        "note": { "name": "note", "type": "text", "primaryKey": false, "notNull": false },
+        "source": { "name": "source", "type": "text", "primaryKey": false, "notNull": true, "default": "'ui'" },
+        "performed_by": { "name": "performed_by", "type": "text", "primaryKey": false, "notNull": false },
+        "performed_by_role": { "name": "performed_by_role", "type": "text", "primaryKey": false, "notNull": false },
+        "location": { "name": "location", "type": "text", "primaryKey": false, "notNull": false },
+        "created_at": { "name": "created_at", "type": "timestamp with time zone", "primaryKey": false, "notNull": true, "default": "now()" }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.items": {
+      "name": "items",
+      "schema": "",
+      "columns": {
+        "id": { "name": "id", "type": "serial", "primaryKey": true, "notNull": true },
+        "name": { "name": "name", "type": "text", "primaryKey": false, "notNull": true },
+        "category": { "name": "category", "type": "text", "primaryKey": false, "notNull": true },
+        "quantity": { "name": "quantity", "type": "integer", "primaryKey": false, "notNull": true, "default": "0" },
+        "par_level": { "name": "par_level", "type": "integer", "primaryKey": false, "notNull": true, "default": "0" },
+        "location": { "name": "location", "type": "text", "primaryKey": false, "notNull": true },
+        "barcode": { "name": "barcode", "type": "text", "primaryKey": false, "notNull": false },
+        "last_updated": { "name": "last_updated", "type": "timestamp with time zone", "primaryKey": false, "notNull": true, "default": "now()" },
+        "created_at": { "name": "created_at", "type": "timestamp with time zone", "primaryKey": false, "notNull": true, "default": "now()" }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.order_items": {
+      "name": "order_items",
+      "schema": "",
+      "columns": {
+        "id": { "name": "id", "type": "serial", "primaryKey": true, "notNull": true },
+        "order_id": { "name": "order_id", "type": "integer", "primaryKey": false, "notNull": true },
+        "item_id": { "name": "item_id", "type": "integer", "primaryKey": false, "notNull": false },
+        "item_name": { "name": "item_name", "type": "text", "primaryKey": false, "notNull": true },
+        "category": { "name": "category", "type": "text", "primaryKey": false, "notNull": true },
+        "ordered_qty": { "name": "ordered_qty", "type": "integer", "primaryKey": false, "notNull": true, "default": "0" },
+        "picked_qty": { "name": "picked_qty", "type": "integer", "primaryKey": false, "notNull": false },
+        "received_qty": { "name": "received_qty", "type": "integer", "primaryKey": false, "notNull": false }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "order_items_order_id_orders_id_fk": {
+          "name": "order_items_order_id_orders_id_fk",
+          "tableFrom": "order_items",
+          "tableTo": "orders",
+          "columnsFrom": ["order_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "order_items_item_id_items_id_fk": {
+          "name": "order_items_item_id_items_id_fk",
+          "tableFrom": "order_items",
+          "tableTo": "items",
+          "columnsFrom": ["item_id"],
+          "columnsTo": ["id"],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.orders": {
+      "name": "orders",
+      "schema": "",
+      "columns": {
+        "id": { "name": "id", "type": "serial", "primaryKey": true, "notNull": true },
+        "location": { "name": "location", "type": "text", "primaryKey": false, "notNull": true },
+        "status": { "name": "status", "type": "text", "primaryKey": false, "notNull": true, "default": "'draft'" },
+        "notes": { "name": "notes", "type": "text", "primaryKey": false, "notNull": false },
+        "archived_at": { "name": "archived_at", "type": "timestamp with time zone", "primaryKey": false, "notNull": false },
+        "archived_by": { "name": "archived_by", "type": "text", "primaryKey": false, "notNull": false },
+        "deleted_at": { "name": "deleted_at", "type": "timestamp with time zone", "primaryKey": false, "notNull": false },
+        "deleted_by": { "name": "deleted_by", "type": "text", "primaryKey": false, "notNull": false },
+        "created_at": { "name": "created_at", "type": "timestamp with time zone", "primaryKey": false, "notNull": true, "default": "now()" },
+        "updated_at": { "name": "updated_at", "type": "timestamp with time zone", "primaryKey": false, "notNull": true, "default": "now()" }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.role_permissions": {
+      "name": "role_permissions",
+      "schema": "",
+      "columns": {
+        "id": { "name": "id", "type": "serial", "primaryKey": true, "notNull": true },
+        "role": { "name": "role", "type": "text", "primaryKey": false, "notNull": true },
+        "permission_key": { "name": "permission_key", "type": "text", "primaryKey": false, "notNull": true },
+        "enabled": { "name": "enabled", "type": "boolean", "primaryKey": false, "notNull": true, "default": "true" },
+        "updated_at": { "name": "updated_at", "type": "timestamp with time zone", "primaryKey": false, "notNull": true, "default": "now()" }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.scan_log": {
+      "name": "scan_log",
+      "schema": "",
+      "columns": {
+        "id": { "name": "id", "type": "serial", "primaryKey": true, "notNull": true },
+        "barcode": { "name": "barcode", "type": "text", "primaryKey": false, "notNull": true },
+        "item_id": { "name": "item_id", "type": "integer", "primaryKey": false, "notNull": false },
+        "item_name": { "name": "item_name", "type": "text", "primaryKey": false, "notNull": false },
+        "location": { "name": "location", "type": "text", "primaryKey": false, "notNull": false },
+        "action": { "name": "action", "type": "text", "primaryKey": false, "notNull": true },
+        "qty_change": { "name": "qty_change", "type": "integer", "primaryKey": false, "notNull": false },
+        "reason": { "name": "reason", "type": "text", "primaryKey": false, "notNull": false },
+        "notes": { "name": "notes", "type": "text", "primaryKey": false, "notNull": false },
+        "operator": { "name": "operator", "type": "text", "primaryKey": false, "notNull": false },
+        "created_at": { "name": "created_at", "type": "timestamp with time zone", "primaryKey": false, "notNull": true, "default": "now()" }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.users": {
+      "name": "users",
+      "schema": "",
+      "columns": {
+        "id": { "name": "id", "type": "serial", "primaryKey": true, "notNull": true },
+        "username": { "name": "username", "type": "text", "primaryKey": false, "notNull": true },
+        "display_name": { "name": "display_name", "type": "text", "primaryKey": false, "notNull": true },
+        "password_hash": { "name": "password_hash", "type": "text", "primaryKey": false, "notNull": true },
+        "role": { "name": "role", "type": "text", "primaryKey": false, "notNull": true, "default": "'stocker'" },
+        "assigned_locations": { "name": "assigned_locations", "type": "text[]", "primaryKey": false, "notNull": true, "default": "'{}'" },
+        "active": { "name": "active", "type": "boolean", "primaryKey": false, "notNull": true, "default": "true" },
+        "must_change_password": { "name": "must_change_password", "type": "boolean", "primaryKey": false, "notNull": true, "default": "false" },
+        "created_at": { "name": "created_at", "type": "timestamp with time zone", "primaryKey": false, "notNull": true, "default": "now()" },
+        "updated_at": { "name": "updated_at", "type": "timestamp with time zone", "primaryKey": false, "notNull": true, "default": "now()" }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "users_username_unique": {
+          "name": "users_username_unique",
+          "nullsNotDistinct": false,
+          "columns": ["username"]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.warehouse_items": {
+      "name": "warehouse_items",
+      "schema": "",
+      "columns": {
+        "id": { "name": "id", "type": "serial", "primaryKey": true, "notNull": true },
+        "name": { "name": "name", "type": "text", "primaryKey": false, "notNull": true },
+        "barcode": { "name": "barcode", "type": "text", "primaryKey": false, "notNull": false },
+        "category": { "name": "category", "type": "text", "primaryKey": false, "notNull": true, "default": "'Uncategorized'" },
+        "quantity": { "name": "quantity", "type": "integer", "primaryKey": false, "notNull": true, "default": "0" },
+        "min_par": { "name": "min_par", "type": "integer", "primaryKey": false, "notNull": true, "default": "0" },
+        "max_par": { "name": "max_par", "type": "integer", "primaryKey": false, "notNull": true, "default": "0" },
+        "reorder_point": { "name": "reorder_point", "type": "integer", "primaryKey": false, "notNull": true, "default": "0" },
+        "case_cost": { "name": "case_cost", "type": "real", "primaryKey": false, "notNull": false },
+        "units_per_case": { "name": "units_per_case", "type": "integer", "primaryKey": false, "notNull": true, "default": "1" },
+        "cost_per_unit": { "name": "cost_per_unit", "type": "real", "primaryKey": false, "notNull": false },
+        "last_purchase_date": { "name": "last_purchase_date", "type": "date", "primaryKey": false, "notNull": false },
+        "last_updated": { "name": "last_updated", "type": "timestamp with time zone", "primaryKey": false, "notNull": true, "default": "now()" },
+        "created_at": { "name": "created_at", "type": "timestamp with time zone", "primaryKey": false, "notNull": true, "default": "now()" }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.warehouse_purchases": {
+      "name": "warehouse_purchases",
+      "schema": "",
+      "columns": {
+        "id": { "name": "id", "type": "serial", "primaryKey": true, "notNull": true },
+        "warehouse_item_id": { "name": "warehouse_item_id", "type": "integer", "primaryKey": false, "notNull": true },
+        "vendor": { "name": "vendor", "type": "text", "primaryKey": false, "notNull": true },
+        "case_cost": { "name": "case_cost", "type": "real", "primaryKey": false, "notNull": true },
+        "cases_received": { "name": "cases_received", "type": "integer", "primaryKey": false, "notNull": true, "default": "1" },
+        "units_per_case": { "name": "units_per_case", "type": "integer", "primaryKey": false, "notNull": true, "default": "1" },
+        "total_units": { "name": "total_units", "type": "integer", "primaryKey": false, "notNull": true },
+        "cost_per_unit": { "name": "cost_per_unit", "type": "real", "primaryKey": false, "notNull": true },
+        "purchase_date": { "name": "purchase_date", "type": "date", "primaryKey": false, "notNull": true },
+        "notes": { "name": "notes", "type": "text", "primaryKey": false, "notNull": false },
+        "created_at": { "name": "created_at", "type": "timestamp with time zone", "primaryKey": false, "notNull": true, "default": "now()" }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.warehouse_transfers": {
+      "name": "warehouse_transfers",
+      "schema": "",
+      "columns": {
+        "id": { "name": "id", "type": "serial", "primaryKey": true, "notNull": true },
+        "warehouse_item_id": { "name": "warehouse_item_id", "type": "integer", "primaryKey": false, "notNull": true },
+        "warehouse_item_name": { "name": "warehouse_item_name", "type": "text", "primaryKey": false, "notNull": true },
+        "store_item_id": { "name": "store_item_id", "type": "integer", "primaryKey": false, "notNull": false },
+        "store_location": { "name": "store_location", "type": "text", "primaryKey": false, "notNull": true },
+        "units_transferred": { "name": "units_transferred", "type": "integer", "primaryKey": false, "notNull": true },
+        "notes": { "name": "notes", "type": "text", "primaryKey": false, "notNull": false },
+        "created_at": { "name": "created_at", "type": "timestamp with time zone", "primaryKey": false, "notNull": true, "default": "now()" }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {},
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

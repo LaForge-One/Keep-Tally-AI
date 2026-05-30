@@ -1,0 +1,28 @@
+{
+  "name": "@workspace/scripts",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "hello": "tsx ./src/hello.ts",
+    "seed": "tsx ./src/seed.ts",
+    "deploy:preflight": "tsx ./src/deploy-preflight.ts",
+    "reset-admin-password": "tsx ./src/reset-admin-password.ts",
+    "import-csv": "tsx ./src/import-csv.ts",
+    "report:tenant-links": "tsx ./src/report-tenant-links.ts",
+    "check:import-fixtures": "tsx ./src/check-import-fixtures.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@workspace/db": "workspace:*",
+    "bcryptjs": "^3.0.3",
+    "csv-parse": "^6.2.1",
+    "drizzle-orm": "catalog:",
+    "pg": "^8.20.0"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@types/pg": "^8.18.0",
+    "tsx": "catalog:"
+  }
+}

@@ -1,0 +1,107 @@
+# Overlay for self-hosted AI on the KeepTally VPS.
+# Usage:
+#   docker compose -f docker-compose.vps.example.yml -f docker-compose.ai.example.yml up -d
+#
+# Keep public exposure tight:
+# - LocalAI and Ollama are internal-only.
+# - Open WebUI and n8n bind to 127.0.0.1 by default; expose through VPN/tunnel/reverse proxy only after auth is configured.
+
+services:
+  keeptally:
+    environment:
+      AI_INTEGRATIONS_OPENAI_BASE_URL: http://localai:8080/v1
+      AI_INTEGRATIONS_OPENAI_API_KEY: ${LOCALAI_API_KEY:-keeptally-local-ai}
+      AI_TEXT_MODEL: ${LOCALAI_TEXT_MODEL:-local-llm}
+      AI_COMMAND_MODEL: ${LOCALAI_COMMAND_MODEL:-local-llm}
+      AI_VOICE_PARSE_MODEL: ${LOCALAI_VOICE_PARSE_MODEL:-local-llm}
+      AI_AGENT_MODEL: ${LOCALAI_AGENT_MODEL:-local-llm}
+      AI_REALTIME_ENABLED: "false"
+      AI_SELF_HOSTED_ENABLED: "true"
+    depends_on:
+      localai:
+        condition: service_started
+
+  localai:
+    image: localai/localai:latest-cpu
+    restart: unless-stopped
+    environment:
+      MODELS_PATH: /models
+      DEBUG: ${LOCALAI_DEBUG:-false}
+      API_KEY: ${LOCALAI_API_KEY:-keeptally-local-ai}
+      THREADS: ${LOCALAI_THREADS:-4}
+      CONTEXT_SIZE: ${LOCALAI_CONTEXT_SIZE:-2048}
+    volumes:
+      - localai-models:/models
+    expose:
+      - "8080"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "-q",
+          "--spider",
+          "http://127.0.0.1:8080/readyz"
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
+
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - ollama-data:/root/.ollama
+    expose:
+      - "11434"
+    profiles:
+      - ai-ui
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    restart: unless-stopped
+    environment:
+      OLLAMA_BASE_URL: http://ollama:11434
+      OPENAI_API_BASE_URL: http://localai:8080/v1
+      OPENAI_API_KEY: ${LOCALAI_API_KEY:-keeptally-local-ai}
+      WEBUI_AUTH: "true"
+    volumes:
+      - open-webui-data:/app/backend/data
+    ports:
+      - "127.0.0.1:${OPEN_WEBUI_PORT:-8088}:8080"
+    depends_on:
+      - ollama
+      - localai
+    profiles:
+      - ai-ui
+
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:latest
+    restart: unless-stopped
+    environment:
+      N8N_HOST: ${N8N_HOST:-127.0.0.1}
+      N8N_PORT: 5678
+      N8N_PROTOCOL: ${N8N_PROTOCOL:-http}
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:-change-this-before-real-use}
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_SECURE_COOKIE: ${N8N_SECURE_COOKIE:-false}
+      GENERIC_TIMEZONE: ${GENERIC_TIMEZONE:-America/Phoenix}
+      OLLAMA_BASE_URL: http://ollama:11434
+      OPENAI_API_BASE_URL: http://localai:8080/v1
+      OPENAI_API_KEY: ${LOCALAI_API_KEY:-keeptally-local-ai}
+    volumes:
+      - n8n-data:/home/node/.n8n
+    ports:
+      - "127.0.0.1:${N8N_PORT:-5678}:5678"
+    depends_on:
+      - ollama
+      - localai
+    profiles:
+      - automation
+
+volumes:
+  localai-models:
+  ollama-data:
+  open-webui-data:
+  n8n-data:
