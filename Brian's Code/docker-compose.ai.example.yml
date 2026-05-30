@@ -22,7 +22,7 @@ services:
         condition: service_started
 
   localai:
-    image: localai/localai:latest-cpu
+    image: localai/localai:latest-aio-cpu
     restart: unless-stopped
     environment:
       MODELS_PATH: /models

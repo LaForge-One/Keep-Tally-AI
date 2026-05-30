@@ -25,6 +25,8 @@ Role:
 
 - OpenAI-compatible API endpoint for KeepTally.
 - Best fit for keeping the existing `AI_INTEGRATIONS_OPENAI_BASE_URL` integration shape.
+- Runs on the `localai/localai:latest-aio-cpu` image so the first VPS test has
+  bundled backend support instead of requiring in-container backend installs.
 
 KeepTally points at:
 
@@ -167,7 +169,8 @@ Why not `gpt4all-j`:
 LocalAI can list a model even when its backend cannot load. If completion fails
 with `backend not found: .../gpt4all-j`, remove that model config and reinstall
 with a GGUF/`llama-cpp` gallery model such as `llama-3.2-1b-instruct:q4_k_m`.
-The helper installs/checks `llama-cpp` before applying the model.
+The compose overlay uses LocalAI's AIO CPU image to keep backend availability
+simple on a CPU VPS.
 
 If LocalAI logs `failed loading galleries` with an invalid JSON message, pull
 the latest repo changes and recreate the LocalAI container. Older `.env.ai`
