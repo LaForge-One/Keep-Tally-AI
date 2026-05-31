@@ -21,6 +21,7 @@
 - Missing `ffmpeg`: browser WebM audio cannot be converted, so transcription fails before it reaches the AI model.
 - Unsupported LocalAI audio model: `/v1/audio/transcriptions` can fail even when `/v1/models` lists a model name.
 - Slow TTS: Start feels delayed if the UI waits for speech playback before listening.
+- TTS during listening: a prompt played while recording can be picked up by the microphone and transcribed as operator input.
 - Manual stop upload: Pause, Finish, Skip, or Repeat can feel broken if a partial recording is uploaded after the user clicks.
 - Permission delay: the first microphone prompt can take seconds and cannot be made sub-millisecond.
 - Empty/silent audio: very short recordings should not be uploaded.

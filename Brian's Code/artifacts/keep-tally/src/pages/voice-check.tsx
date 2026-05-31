@@ -735,7 +735,6 @@ export default function VoiceCheck() {
 
     setStatusMessage("Ready. Say an item name and count.");
     setPhase("custom-listening");
-    void speak("Ready. Say an item name and count.");
 
     while (!controlRef.current.shouldStop && !controlRef.current.shouldPause) {
       setPhase("custom-listening");

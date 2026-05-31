@@ -175,7 +175,8 @@ export function useAIVoice() {
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const stopRecordingRef = useRef<(() => void) | null>(null);
-  const activeFetchControllerRef = useRef<AbortController | null>(null);
+  const activeTtsFetchControllerRef = useRef<AbortController | null>(null);
+  const activeTranscribeFetchControllerRef = useRef<AbortController | null>(null);
   const discardRecordingRef = useRef(false);
   const abortedRef = useRef(false);
 
@@ -183,7 +184,8 @@ export function useAIVoice() {
     return () => {
       abortedRef.current = true;
       currentAudioRef.current?.pause();
-      activeFetchControllerRef.current?.abort();
+      activeTtsFetchControllerRef.current?.abort();
+      activeTranscribeFetchControllerRef.current?.abort();
       try {
         mediaRecorderRef.current?.stop();
       } catch {}
@@ -200,7 +202,7 @@ export function useAIVoice() {
         credentials: "include",
         body: JSON.stringify({ text }),
       }, SPEAK_TIMEOUT_MS, (controller) => {
-        activeFetchControllerRef.current = controller;
+        activeTtsFetchControllerRef.current = controller;
       });
 
       if (!res.ok || abortedRef.current) {
@@ -370,7 +372,7 @@ export function useAIVoice() {
             credentials: "include",
             body: formData,
           }, TRANSCRIBE_TIMEOUT_MS, (controller) => {
-            activeFetchControllerRef.current = controller;
+            activeTranscribeFetchControllerRef.current = controller;
           });
 
           if (!res.ok) {
@@ -403,6 +405,8 @@ export function useAIVoice() {
       currentAudioRef.current.pause();
       currentAudioRef.current = null;
     }
+    activeTtsFetchControllerRef.current?.abort();
+    activeTtsFetchControllerRef.current = null;
     window.speechSynthesis?.cancel();
   }, []);
 
@@ -413,8 +417,8 @@ export function useAIVoice() {
 
   const stopListening = useCallback(() => {
     discardRecordingRef.current = true;
-    activeFetchControllerRef.current?.abort();
-    activeFetchControllerRef.current = null;
+    activeTranscribeFetchControllerRef.current?.abort();
+    activeTranscribeFetchControllerRef.current = null;
     stopRecordingRef.current?.();
     stopRecordingRef.current = null;
   }, []);
