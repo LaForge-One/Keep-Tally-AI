@@ -5,7 +5,7 @@ import { useAuth } from "@/contexts/auth-context";
 import { NoPermissionPage } from "@/components/permission-guard";
 import { getListItemsQueryKey, useListItems } from "@workspace/api-client-react";
 import { useSelectedLocation, LOCATIONS } from "@/contexts/location-context";
-import { useAIVoice, getAIVoiceSupport, type ListenResult, type MicrophonePrecheckResult } from "@/hooks/use-ai-voice";
+import { useAIVoice, getAIVoiceSupport, type ListenProgress, type ListenResult, type MicrophonePrecheckResult } from "@/hooks/use-ai-voice";
 import { toast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import {
@@ -388,6 +388,7 @@ export default function VoiceCheck() {
   const [statusMessage, setStatusMessage] = useState("");
   const [lastHeard, setLastHeard] = useState("");
   const [voiceNotice, setVoiceNotice] = useState("");
+  const [voiceCapture, setVoiceCapture] = useState<ListenProgress | null>(null);
   const [aiStatus, setAiStatus] = useState<AIStatus | null>(null);
   const [pendingCounted, setPendingCounted] = useState<number | null>(null);
   const [micPrecheck, setMicPrecheck] = useState<MicrophonePrecheckResult | null>(null);
@@ -503,7 +504,9 @@ export default function VoiceCheck() {
   const safeListen = useCallback(async (timeoutMs: number): Promise<string | null> => {
     if (controlRef.current.shouldStop || controlRef.current.shouldPause) return null;
     vibrate([50, 30, 50]);
-    const result = await listenDetailed(timeoutMs);
+    setVoiceCapture({ state: "requesting-microphone" });
+    const result = await listenDetailed(timeoutMs, setVoiceCapture);
+    setVoiceCapture(null);
     if (controlRef.current.shouldStop || controlRef.current.shouldPause) return null;
     if (controlRef.current.shouldSkip || controlRef.current.shouldRepeat) return "";
     if (!result.ok) {
@@ -945,6 +948,7 @@ export default function VoiceCheck() {
   const handlePause = useCallback(() => {
     controlRef.current.shouldPause = true;
     setPhase("paused");
+    setVoiceCapture(null);
     cancelAll();
     releaseWakeLock();
   }, [cancelAll, releaseWakeLock]);
@@ -973,6 +977,7 @@ export default function VoiceCheck() {
   const handleFinish = useCallback(() => {
     controlRef.current.shouldStop = true;
     setPhase("complete");
+    setVoiceCapture(null);
     cancelAll();
     releaseWakeLock();
   }, [cancelAll, releaseWakeLock]);
@@ -997,6 +1002,7 @@ export default function VoiceCheck() {
     setCustomMatchedItem(null);
     setCustomSpokenQty(null);
     setVoiceNotice("");
+    setVoiceCapture(null);
   }, []);
 
   /* ── Derived state ── */
@@ -1012,6 +1018,15 @@ export default function VoiceCheck() {
   const summarySkipped = sessionResults.filter((r) => r.status === "skipped" || r.status === "no-response").length;
 
   const queueSize = buildQueue().length;
+  const voiceCaptureLabel =
+    voiceCapture?.state === "requesting-microphone"
+      ? "Opening microphone..."
+      : voiceCapture?.state === "recording"
+      ? "Recording voice..."
+      : voiceCapture?.state === "transcribing"
+      ? "Transcribing audio..."
+      : "";
+  const voiceCaptureLevel = voiceCapture?.state === "recording" ? voiceCapture.level : 0;
 
   const showOverlay = (isActive || phase === "paused") && (isCustomMode || !!currentItem);
 
@@ -1141,16 +1156,30 @@ export default function VoiceCheck() {
                     <div className="relative flex items-center justify-center">
                       <span className="absolute w-28 h-28 rounded-full bg-primary/15 animate-ping" />
                       <span className="absolute w-22 h-22 rounded-full bg-primary/12 animate-pulse" />
-                      <div className="relative w-24 h-24 rounded-full bg-primary flex items-center justify-center shadow-xl">
+                      <div className={`relative w-24 h-24 rounded-full flex items-center justify-center shadow-xl transition-colors ${
+                        voiceCapture?.state === "transcribing" ? "bg-amber-500" : "bg-primary"
+                      }`}>
                         <Mic className="w-11 h-11 text-primary-foreground" />
                       </div>
                     </div>
                     <div className="text-center">
-                      <p className="text-lg font-black text-primary">Listening…</p>
+                      <p className="text-lg font-black text-primary">{voiceCaptureLabel || "Listening..."}</p>
+                      {voiceCapture?.state === "recording" && (
+                        <div className="mt-2 w-48 h-2 rounded-full bg-muted overflow-hidden">
+                          <div
+                            className="h-full rounded-full bg-primary transition-[width] duration-100"
+                            style={{ width: `${Math.max(6, voiceCaptureLevel)}%` }}
+                          />
+                        </div>
+                      )}
                       {lastHeard ? (
                         <p className="text-sm text-muted-foreground mt-1 italic">"{lastHeard}"</p>
                       ) : (
-                        <p className="text-xs text-muted-foreground mt-1">Say <em>"done"</em> to finish</p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {voiceCapture?.state === "transcribing"
+                            ? "Processing what you said"
+                            : "Say an item name and count, or say \"done\" to finish"}
+                        </p>
                       )}
                     </div>
                   </div>

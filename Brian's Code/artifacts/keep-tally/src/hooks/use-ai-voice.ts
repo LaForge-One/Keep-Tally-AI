@@ -27,6 +27,11 @@ export type ListenResult =
         | "microphone-timeout";
     };
 
+export type ListenProgress =
+  | { state: "requesting-microphone" }
+  | { state: "recording"; level: number }
+  | { state: "transcribing" };
+
 export type MicrophonePrecheckResult =
   | { ok: true; message: string; details: string[] }
   | {
@@ -62,7 +67,7 @@ const SILENCE_THRESHOLD = 8;
 const SILENCE_DURATION_MS = END_OF_UTTERANCE_SILENCE_MS;
 const MIN_RECORD_MS = 600;
 
-function createSilenceDetector(stream: MediaStream, onSilence: () => void) {
+function createSilenceDetector(stream: MediaStream, onSilence: () => void, onLevel?: (level: number) => void) {
   const ctx = new AudioContext();
   const source = ctx.createMediaStreamSource(stream);
   const analyser = ctx.createAnalyser();
@@ -79,6 +84,7 @@ function createSilenceDetector(stream: MediaStream, onSilence: () => void) {
     analyser.getByteFrequencyData(dataArray);
     const rms = Math.sqrt(dataArray.reduce((sum, value) => sum + value * value, 0) / dataArray.length);
     const now = Date.now();
+    onLevel?.(Math.min(100, Math.round((rms / 64) * 100)));
 
     if (rms < SILENCE_THRESHOLD) {
       if (silenceStart === null) silenceStart = now;
@@ -290,7 +296,10 @@ export function useAIVoice() {
     };
   }, []);
 
-  const listenDetailed = useCallback(async (timeoutMs = 8000): Promise<ListenResult> => {
+  const listenDetailed = useCallback(async (
+    timeoutMs = 8000,
+    onProgress?: (progress: ListenProgress) => void,
+  ): Promise<ListenResult> => {
     if (abortedRef.current) return { ok: false, reason: "aborted" };
     discardRecordingRef.current = false;
     if (!window.isSecureContext || typeof MediaRecorder === "undefined" || !navigator.mediaDevices?.getUserMedia) {
@@ -300,6 +309,7 @@ export function useAIVoice() {
     let stream: MediaStream | null = null;
 
     try {
+      onProgress?.({ state: "requesting-microphone" });
       stream = await getMicrophoneStream();
     } catch {
       return { ok: false, reason: "microphone-denied" };
@@ -335,7 +345,23 @@ export function useAIVoice() {
       let stopSilenceDetector: (() => void) | null = null;
       const timer = window.setTimeout(() => stopRecording(), timeoutMs);
 
+      function stopRecording() {
+        if (recorder.state !== "inactive") {
+          try {
+            recorder.stop();
+          } catch {}
+        }
+      }
+
+      stopRecordingRef.current = stopRecording;
+      stopSilenceDetector = createSilenceDetector(stream!, stopRecording, (level) => {
+        onProgress?.({ state: "recording", level });
+      });
+      onProgress?.({ state: "recording", level: 0 });
+      recorder.start(250);
+
       recorder.onstop = async () => {
+        onProgress?.({ state: "transcribing" });
         stream!.getTracks().forEach((track) => track.stop());
         stopSilenceDetector?.();
         window.clearTimeout(timer);
@@ -385,18 +411,6 @@ export function useAIVoice() {
           resolve({ ok: false, reason: "transcription-failed" });
         }
       };
-
-      function stopRecording() {
-        if (recorder.state !== "inactive") {
-          try {
-            recorder.stop();
-          } catch {}
-        }
-      }
-
-      stopRecordingRef.current = stopRecording;
-      stopSilenceDetector = createSilenceDetector(stream!, stopRecording);
-      recorder.start(250);
     });
   }, []);
 
