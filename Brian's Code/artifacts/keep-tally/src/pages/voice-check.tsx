@@ -59,6 +59,7 @@ type Phase =
 type CountMode = "all" | "low-stock" | "category" | "custom";
 
 type ResultStatus = "verified" | "updated-lower" | "updated-higher" | "skipped" | "no-response";
+type ConfirmationChoice = "yes" | "no";
 
 interface SessionResult {
   item: Item;
@@ -405,6 +406,7 @@ export default function VoiceCheck() {
   const [lastHeard, setLastHeard] = useState("");
   const [voiceNotice, setVoiceNotice] = useState("");
   const [voiceCapture, setVoiceCapture] = useState<ListenProgress | null>(null);
+  const [pendingConfirmation, setPendingConfirmation] = useState<{ item: Item; quantity: number } | null>(null);
   const [aiStatus, setAiStatus] = useState<AIStatus | null>(null);
   const [pendingCounted, setPendingCounted] = useState<number | null>(null);
   const [micPrecheck, setMicPrecheck] = useState<MicrophonePrecheckResult | null>(null);
@@ -418,6 +420,7 @@ export default function VoiceCheck() {
   const currentIndexRef = useRef(0);
   const sessionResultsRef = useRef<SessionResult[]>([]);
   const isRunningRef = useRef(false);
+  const confirmationResolverRef = useRef<((choice: ConfirmationChoice) => void) | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const wakeLockRef = useRef<any>(null);
 
@@ -599,29 +602,42 @@ export default function VoiceCheck() {
     const message = `I heard ${item.name}, count ${quantity}. Say yes to save, or no to try again.`;
     setVoiceNotice(message);
     setStatusMessage(message);
+    setPendingConfirmation({ item, quantity });
     await safeSpeak(message);
 
     setPhase("custom-listening");
     setLastHeard("");
-    const confirmationTranscript = await safeListen(10000);
-    if (confirmationTranscript === null) return false;
+    const manualConfirmation = new Promise<ConfirmationChoice>((resolve) => {
+      confirmationResolverRef.current = resolve;
+    });
+    try {
+      const confirmation = await Promise.race<ConfirmationChoice | "unknown">([
+        manualConfirmation,
+        safeListen(10000).then((confirmationTranscript) => {
+          if (confirmationTranscript === null) return "unknown";
+          return parseConfirmation(confirmationTranscript);
+        }),
+      ]);
 
-    const confirmation = parseConfirmation(confirmationTranscript);
-    if (confirmation === "yes") {
-      setVoiceNotice("");
-      return true;
-    }
-    if (confirmation === "no") {
-      const retryMessage = "Okay, not saved. Try that item again.";
-      setVoiceNotice(retryMessage);
-      await safeSpeak(retryMessage);
+      if (confirmation === "yes") {
+        setVoiceNotice("");
+        return true;
+      }
+      if (confirmation === "no") {
+        const retryMessage = "Okay, not saved. Try that item again.";
+        setVoiceNotice(retryMessage);
+        await safeSpeak(retryMessage);
+        return false;
+      }
+
+      const unclearMessage = "I could not confirm that, so I did not save it. Use Confirm Save or try again.";
+      setVoiceNotice(unclearMessage);
+      await safeSpeak(unclearMessage);
       return false;
+    } finally {
+      confirmationResolverRef.current = null;
+      setPendingConfirmation(null);
     }
-
-    const unclearMessage = "I could not confirm that, so I did not save it. Please try again.";
-    setVoiceNotice(unclearMessage);
-    await safeSpeak(unclearMessage);
-    return false;
   }, [safeListen, safeSpeak]);
 
   /* ── QUEUE-BASED session (All / Low-Stock / Category) ── */
@@ -984,6 +1000,8 @@ export default function VoiceCheck() {
     controlRef.current.shouldPause = true;
     setPhase("paused");
     setVoiceCapture(null);
+    confirmationResolverRef.current?.("no");
+    confirmationResolverRef.current = null;
     cancelAll();
     releaseWakeLock();
   }, [cancelAll, releaseWakeLock]);
@@ -1009,10 +1027,18 @@ export default function VoiceCheck() {
     stopListening();
   }, [cancelSpeech, stopListening]);
 
+  const handleManualConfirmation = useCallback((choice: ConfirmationChoice) => {
+    confirmationResolverRef.current?.(choice);
+    stopListening();
+    setVoiceCapture(null);
+  }, [stopListening]);
+
   const handleFinish = useCallback(() => {
     controlRef.current.shouldStop = true;
     setPhase("complete");
     setVoiceCapture(null);
+    confirmationResolverRef.current?.("no");
+    confirmationResolverRef.current = null;
     cancelAll();
     releaseWakeLock();
   }, [cancelAll, releaseWakeLock]);
@@ -1038,6 +1064,9 @@ export default function VoiceCheck() {
     setCustomSpokenQty(null);
     setVoiceNotice("");
     setVoiceCapture(null);
+    setPendingConfirmation(null);
+    confirmationResolverRef.current?.("no");
+    confirmationResolverRef.current = null;
   }, []);
 
   /* ── Derived state ── */
@@ -1339,6 +1368,34 @@ export default function VoiceCheck() {
                 ) : null}
               </div>
             </>
+          )}
+
+          {isCustomMode && pendingConfirmation && (
+            <div className="rounded-xl border border-primary/20 bg-primary/5 p-3 space-y-3">
+              <div className="text-center">
+                <p className="text-xs font-bold uppercase tracking-wider text-primary">Confirm count</p>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Save <span className="font-semibold text-foreground">{pendingConfirmation.item.name}</span> as count{" "}
+                  <span className="font-black text-foreground tabular-nums">{pendingConfirmation.quantity}</span>?
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => handleManualConfirmation("no")}
+                  className="h-12 rounded-xl border border-border bg-card text-sm font-semibold text-foreground active:scale-[0.98] transition-transform"
+                >
+                  Try Again
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleManualConfirmation("yes")}
+                  className="h-12 rounded-xl bg-primary text-primary-foreground text-sm font-bold active:scale-[0.98] transition-transform"
+                >
+                  Confirm Save
+                </button>
+              </div>
+            </div>
           )}
 
           {/* Last 3 results — shown in both modes */}
