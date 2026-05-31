@@ -92,6 +92,7 @@ Use these in `.env.vps-test` for a less robotic voice:
 AI_TTS_VOICE=shimmer
 AI_TTS_INSTRUCTIONS=Use a warm, polite, natural human voice. Keep prompts brief, calm, and easy to understand for an inventory operator.
 VITE_VOICE_COUNT_TTS_ENABLED=false
+VITE_VOICE_COUNT_CONFIRMATION_AUDIO_ENABLED=true
 ```
 
 Recommended voice options:
@@ -103,7 +104,7 @@ Recommended voice options:
 
 If LocalAI does not support the selected voice for the active `AI_TTS_MODEL`, the API will return a TTS error and the browser will fall back to browser speech.
 
-For transcription testing, keep `VITE_VOICE_COUNT_TTS_ENABLED=false`. This prevents the app from speaking while the microphone workflow is active. Re-enable it only after transcription is stable.
+For transcription testing, keep `VITE_VOICE_COUNT_TTS_ENABLED=false`. This prevents the app from using the slower server TTS path while the microphone workflow is active. Keep `VITE_VOICE_COUNT_CONFIRMATION_AUDIO_ENABLED=true` so short browser-native confirmation prompts still play after the app hears an item and count.
 
 Check whether the deployed frontend is current:
 

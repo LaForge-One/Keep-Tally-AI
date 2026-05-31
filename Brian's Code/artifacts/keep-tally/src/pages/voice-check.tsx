@@ -40,6 +40,8 @@ const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const LARGE_DELTA_MULTIPLIER = 2;
 const LARGE_DELTA_MIN_UNITS = 20;
 const VOICE_COUNT_TTS_ENABLED = import.meta.env.VITE_VOICE_COUNT_TTS_ENABLED === "true";
+const VOICE_COUNT_CONFIRMATION_AUDIO_ENABLED =
+  import.meta.env.VITE_VOICE_COUNT_CONFIRMATION_AUDIO_ENABLED !== "false";
 
 type LocationOption = { id: number; name: string; slug: string };
 
@@ -386,6 +388,7 @@ export default function VoiceCheck() {
   );
   const {
     speak,
+    speakBrowser,
     cancelSpeech,
     listenDetailed,
     precheckMicrophone,
@@ -510,15 +513,17 @@ export default function VoiceCheck() {
   }, []);
 
   /* ── Voice helpers ── */
-  const safeSpeak = useCallback(async (text: string): Promise<boolean> => {
+  const safeSpeak = useCallback(async (text: string, opts: { audible?: boolean } = {}): Promise<boolean> => {
     if (controlRef.current.shouldStop || controlRef.current.shouldPause) return false;
     setStatusMessage(text);
     vibrate(30);
     if (VOICE_COUNT_TTS_ENABLED) {
       await speak(text);
+    } else if (opts.audible && VOICE_COUNT_CONFIRMATION_AUDIO_ENABLED) {
+      await speakBrowser(text);
     }
     return !controlRef.current.shouldStop && !controlRef.current.shouldPause;
-  }, [speak]);
+  }, [speak, speakBrowser]);
 
   const safeListen = useCallback(async (timeoutMs: number): Promise<string | null> => {
     if (controlRef.current.shouldStop || controlRef.current.shouldPause) return null;
@@ -578,7 +583,7 @@ export default function VoiceCheck() {
       description: message,
       variant: "destructive",
     });
-    await safeSpeak("Could not save. Try again.");
+    await safeSpeak("Could not save. Try again.", { audible: true });
   }, [safeSpeak]);
 
   const notifyCountSaved = useCallback((message: string) => {
@@ -594,7 +599,7 @@ export default function VoiceCheck() {
     if (!isLargeQuantityChange(item, quantity)) return true;
     const message = `Large change for ${item.name}: system count ${item.quantity}, heard ${quantity}.`;
     setVoiceNotice(message);
-    await safeSpeak(message);
+    await safeSpeak(message, { audible: true });
     return window.confirm(`${message}\n\nSave this count?`);
   }, [safeSpeak]);
 
@@ -603,10 +608,11 @@ export default function VoiceCheck() {
     setVoiceNotice(message);
     setStatusMessage(message);
     setPendingConfirmation({ item, quantity });
-    await safeSpeak(message);
+    await safeSpeak(message, { audible: true });
 
     setPhase("custom-listening");
     setLastHeard("");
+    setStatusMessage("Listening for yes or no. You can also tap Confirm Save.");
     const manualConfirmation = new Promise<ConfirmationChoice>((resolve) => {
       confirmationResolverRef.current = resolve;
     });
@@ -626,13 +632,13 @@ export default function VoiceCheck() {
       if (confirmation === "no") {
         const retryMessage = "Okay, not saved. Try that item again.";
         setVoiceNotice(retryMessage);
-        await safeSpeak(retryMessage);
+        await safeSpeak(retryMessage, { audible: true });
         return false;
       }
 
       const unclearMessage = "I could not confirm that, so I did not save it. Use Confirm Save or try again.";
       setVoiceNotice(unclearMessage);
-      await safeSpeak(unclearMessage);
+      await safeSpeak(unclearMessage, { audible: true });
       return false;
     } finally {
       confirmationResolverRef.current = null;

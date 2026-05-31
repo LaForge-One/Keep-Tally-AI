@@ -228,6 +228,11 @@ export function useAIVoice() {
     }
   }, []);
 
+  const speakBrowser = useCallback(async (text: string): Promise<void> => {
+    if (abortedRef.current) return;
+    await speakWithBrowserTts(text);
+  }, []);
+
   const precheckMicrophone = useCallback(async (): Promise<MicrophonePrecheckResult> => {
     const support = getAIVoiceSupport();
     const details = [
@@ -449,6 +454,7 @@ export function useAIVoice() {
 
   return {
     speak,
+    speakBrowser,
     cancelSpeech,
     listen,
     listenDetailed,
