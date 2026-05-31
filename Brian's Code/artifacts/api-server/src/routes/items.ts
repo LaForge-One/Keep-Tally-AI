@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { and, eq, inArray, or } from "drizzle-orm";
+import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   db,
@@ -102,14 +102,33 @@ async function resolveLocationByName(
   res: Response,
   location: string,
 ): Promise<LocationRow | null> {
-  const [row] = await db
+  const normalizedLocation = location.trim();
+  if (!normalizedLocation) {
+    res.status(400).json({ error: "Location is required" });
+    return null;
+  }
+
+  let [row] = await db
     .select()
     .from(locationsTable)
-    .where(and(eq(locationsTable.accountId, req.account!.id), eq(locationsTable.name, location)))
+    .where(and(eq(locationsTable.accountId, req.account!.id), eq(locationsTable.name, normalizedLocation)))
     .limit(1);
 
+  if (!row) {
+    [row] = await db
+      .select()
+      .from(locationsTable)
+      .where(
+        and(
+          eq(locationsTable.accountId, req.account!.id),
+          sql`lower(${locationsTable.name}) = ${normalizedLocation.toLowerCase()}`,
+        ),
+      )
+      .limit(1);
+  }
+
   if (!row || row.status !== "active") {
-    res.status(400).json({ error: "Invalid location" });
+    res.status(400).json({ error: `Invalid location: ${normalizedLocation}` });
     return null;
   }
 

@@ -25,6 +25,12 @@ export const warehouseItemsTable = pgTable(
   (table) => ({
     accountWarehouseIdx: index("warehouse_items_account_warehouse_idx").on(table.accountId, table.warehouseId),
     accountBarcodeIdx: index("warehouse_items_account_barcode_idx").on(table.accountId, table.barcode),
+    accountWarehouseCategoryNameIdx: index("warehouse_items_account_warehouse_category_name_idx").on(
+      table.accountId,
+      table.warehouseId,
+      table.category,
+      table.name,
+    ),
   }),
 );
 

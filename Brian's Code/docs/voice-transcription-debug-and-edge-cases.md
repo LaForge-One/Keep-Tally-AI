@@ -31,7 +31,7 @@
 
 - UI transition after clicking Start: immediate.
 - Microphone permission check: browser-dependent, usually under a few seconds after permission is already granted.
-- Recording stop after silence: about 1.4 seconds by current design.
+- Recording stop after silence: seven seconds by current design.
 - Audio conversion: normally sub-second for short clips.
 - AI transcription: model-dependent, not database-dependent. Local database speed does not control this step.
 - Database save after a parsed count: should be fast because the database is on the VPS.
@@ -140,3 +140,16 @@ The current workflow is still request/response transcription. That is acceptable
 - Return partial transcripts as events.
 - Parse commands incrementally.
 - Save counts only after a confirmed parsed command.
+
+## What Gets Recorded Today
+
+- The browser records a temporary audio clip only long enough to request transcription.
+- Raw audio is not saved to disk or PostgreSQL.
+- The transcript is shown in the UI, but it is not stored in a dedicated transcript table.
+- A database write happens only after the app has parsed and confirmed a count.
+- Matching counts call `POST /api/items/:id/verify`, which writes a history record.
+- Changed counts call `POST /api/items/:id/adjust`, which updates inventory and writes a history record.
+
+## Current Accounting Gap
+
+The current implementation records the final inventory action, not the full voice-count session. Accounting can see that an item was verified or adjusted, but cannot yet see a durable record of each spoken prompt, transcript, confirmation, skipped item, or failed transcription. The recommended upgrade is to add count session tables before production accounting use.

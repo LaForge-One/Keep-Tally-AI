@@ -35,6 +35,7 @@ const port = requiredEnv("PORT");
 const databaseUrl = requiredEnv("DATABASE_URL");
 const sessionSecret = requiredEnv("SESSION_SECRET");
 const corsOrigin = requiredEnv("CORS_ORIGIN");
+const minimumItems = Number.parseInt(env("DEPLOY_PREFLIGHT_MIN_ITEMS") || "0", 10);
 
 add(
   "env:NODE_ENV",
@@ -94,6 +95,7 @@ const migrationFiles = existsSync(migrationsDir)
 add("db:migration files", migrationFiles.length > 0, `${migrationFiles.length} sql files`);
 add("db:latest lookup index migration", migrationFiles.includes("0006_lookup_indexes.sql"), "0006_lookup_indexes.sql");
 add("db:store min/max migration", migrationFiles.includes("0008_store_min_max_stock.sql"), "0008_store_min_max_stock.sql");
+add("db:classification index migration", migrationFiles.includes("0009_classification_indexes.sql"), "0009_classification_indexes.sql");
 add(
   "db:phase one relational index migration",
   migrationFiles.includes("0007_phase_one_relational_indexes.sql"),
@@ -126,10 +128,19 @@ if (databaseUrl) {
         counts.rows[0].users > 0 && counts.rows[0].locations > 0,
         `users=${counts.rows[0].users}, locations=${counts.rows[0].locations}, items=${counts.rows[0].items}`,
       );
+      if (Number.isFinite(minimumItems) && minimumItems > 0) {
+        add(
+          "db:test item volume",
+          counts.rows[0].items >= minimumItems,
+          `items=${counts.rows[0].items}, expected_at_least=${minimumItems}`,
+        );
+      }
 
       const requiredIndexes = [
         "items_account_location_name_idx",
         "items_account_legacy_location_name_idx",
+        "items_account_category_name_idx",
+        "items_account_location_category_name_idx",
         "user_location_assignments_account_location_idx",
         "user_location_assignments_account_user_idx",
         "history_account_item_created_idx",
@@ -140,6 +151,7 @@ if (databaseUrl) {
         "warehouse_purchases_account_item_created_idx",
         "warehouse_transfers_account_warehouse_item_created_idx",
         "warehouse_transfers_account_store_item_created_idx",
+        "warehouse_items_account_warehouse_category_name_idx",
       ];
       const indexes = await client.query(
         `
@@ -286,11 +298,12 @@ if (databaseUrl) {
         (adminRows.get("enabled admin permissions") ?? 0) === 14,
         `enabled=${adminRows.get("enabled admin permissions") ?? 0}/14`,
       );
-      const authIssues = [
+      const authIssueCounts: Array<[string, number]> = [
         ["unsupported user roles", adminRows.get("unsupported user roles") ?? 0],
         ["unsupported membership roles", adminRows.get("unsupported membership roles") ?? 0],
         ["duplicate usernames", adminRows.get("duplicate usernames") ?? 0],
-      ].filter(([, count]) => count > 0);
+      ];
+      const authIssues = authIssueCounts.filter(([, count]) => count > 0);
       add(
         "auth:role and username integrity",
         authIssues.length === 0,

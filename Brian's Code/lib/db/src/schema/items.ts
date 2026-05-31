@@ -28,6 +28,8 @@ export const itemsTable = pgTable(
     accountLocationNameIdx: index("items_account_location_name_idx").on(table.accountId, table.locationId, table.name),
     accountLegacyLocationNameIdx: index("items_account_legacy_location_name_idx").on(table.accountId, table.location, table.name),
     accountBarcodeIdx: index("items_account_barcode_idx").on(table.accountId, table.barcode),
+    accountCategoryNameIdx: index("items_account_category_name_idx").on(table.accountId, table.category, table.name),
+    accountLocationCategoryNameIdx: index("items_account_location_category_name_idx").on(table.accountId, table.locationId, table.category, table.name),
     accountLocationMinQtyIdx: index("items_account_location_min_qty_idx").on(table.accountId, table.locationId, table.minQuantity),
     accountLocationMaxQtyIdx: index("items_account_location_max_qty_idx").on(table.accountId, table.locationId, table.maxQuantity),
   }),

@@ -17,7 +17,7 @@ Prepare KeepTally for a test VPS deployment where:
 ```mermaid
 flowchart LR
   User["Browser"] --> Proxy["Nginx or Caddy TLS proxy"]
-  Proxy --> App["KeepTally Docker container :3000"]
+  Proxy --> App["KeepTally Docker container 127.0.0.1:3000"]
   App --> Web["Static React build"]
   App --> API["Express API"]
   API --> DB["Host PostgreSQL"]
@@ -41,6 +41,8 @@ The app exposes:
 - `GET /api/healthz`
 - `GET /api/ai/status`
 - `GET /api/locations`
+
+For the VPS test environment, publish the container only on localhost and let the public HTTPS proxy handle all outside traffic. See [secure-vps-test-access.md](secure-vps-test-access.md).
 
 ## Required VPS Environment
 

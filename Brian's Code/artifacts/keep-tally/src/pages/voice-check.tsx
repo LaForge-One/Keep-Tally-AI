@@ -362,6 +362,7 @@ export default function VoiceCheck() {
     data: allItems,
     isLoading: itemsLoading,
     isError: itemsError,
+    error: itemsLoadError,
   } = useListItems(
     listItemsParams,
     { query: { queryKey: getListItemsQueryKey(listItemsParams), retry: false } },
@@ -406,6 +407,10 @@ export default function VoiceCheck() {
   const items = allItems ?? [];
   const hasItems = items.length > 0;
   const selectableLocations = locationOptions.length > 0 ? locationOptions.map((location) => location.name) : [...LOCATIONS];
+  const itemsErrorMessage =
+    itemsLoadError instanceof Error
+      ? itemsLoadError.message
+      : "The item request failed.";
 
   useEffect(() => {
     let cancelled = false;
@@ -1514,7 +1519,9 @@ export default function VoiceCheck() {
                 {itemsLoading ? (
                   <span>Loading items at {sessionLocation}…</span>
                 ) : itemsError ? (
-                  <span className="text-destructive">Could not load items for {sessionLocation}. Try again or choose another location.</span>
+                  <span className="text-destructive">
+                    Could not load items for {sessionLocation}. {itemsErrorMessage}
+                  </span>
                 ) : hasItems ? (
                   <>
                     <span className="text-2xl font-black text-foreground">{items.length}</span>
