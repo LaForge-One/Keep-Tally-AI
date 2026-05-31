@@ -229,6 +229,17 @@ function parseVoiceCommand(transcript: string, items: Item[]): { item: Item; qua
   return { item: match.item, quantity };
 }
 
+function voiceCandidateItems(transcript: string, items: Item[]): Item[] {
+  const withoutNumbers = transcript
+    .toLowerCase()
+    .replace(/\b\d+\b/g, " ")
+    .replace(new RegExp(`\\b(${Object.keys(WORD_MAP).join("|")})\\b`, "g"), " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const ranked = rankItemMatches(withoutNumbers || transcript, items).slice(0, 80).map((match) => match.item);
+  return ranked.length > 0 ? ranked : items.slice(0, 80);
+}
+
 function isLargeQuantityChange(item: Item, quantity: number): boolean {
   const unitDelta = Math.abs(quantity - item.quantity);
   return unitDelta >= LARGE_DELTA_MIN_UNITS || quantity >= Math.max(1, item.quantity) * LARGE_DELTA_MULTIPLIER;
@@ -273,11 +284,14 @@ async function parseWithAI(
   items: Item[],
   opts?: { currentItemName?: string; currentParLevel?: number; currentMinQuantity?: number; currentMaxQuantity?: number },
 ): Promise<GPTParseResult> {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), 7000);
   try {
     const res = await fetch(`${BASE}/api/voice/parse`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "include",
+      signal: controller.signal,
       body: JSON.stringify({
         transcript,
         mode,
@@ -319,6 +333,8 @@ async function parseWithAI(
       }
     }
     return { action: "unknown" };
+  } finally {
+    window.clearTimeout(timer);
   }
 }
 
@@ -562,6 +578,15 @@ export default function VoiceCheck() {
     await safeSpeak("Could not save. Try again.");
   }, [safeSpeak]);
 
+  const notifyCountSaved = useCallback((message: string) => {
+    setVoiceNotice(message);
+    setStatusMessage(message);
+    toast({
+      title: "Count saved",
+      description: message,
+    });
+  }, []);
+
   const confirmLargeChange = useCallback(async (item: Item, quantity: number) => {
     if (!isLargeQuantityChange(item, quantity)) return true;
     const message = `Large change for ${item.name}: system count ${item.quantity}, heard ${quantity}.`;
@@ -764,41 +789,43 @@ export default function VoiceCheck() {
       // Stop commands
       if (/\b(done|stop|finish|exit|end|quit)\b/.test(transcript)) break;
 
-      // Parse "item name + quantity" via GPT, then local matching when AI is unavailable.
-      let aiCustom = await parseWithAI(transcript, "custom", sessionItems);
+      setStatusMessage(`Heard "${transcript}". Matching item...`);
+
+      // Try deterministic database-backed matching first; use AI only as a fallback.
+      const localParse = parseVoiceCommand(transcript, sessionItems);
+      let aiCustom: GPTParseResult = { action: "unknown" };
+      if (localParse && "ambiguous" in localParse) {
+        const candidates = localParse.ambiguous.map((item) => item.name).join(", ");
+        const message = `That could be ${candidates}. Please say a more specific item name.`;
+        setVoiceNotice(message);
+        setStatusMessage(message);
+        await safeSpeak(message);
+        continue;
+      }
+      if (localParse && "item" in localParse) {
+        aiCustom = {
+          action: "custom",
+          itemId: localParse.item.id,
+          itemName: localParse.item.name,
+          quantity: localParse.quantity,
+        };
+      } else {
+        aiCustom = await parseWithAI(transcript, "custom", voiceCandidateItems(transcript, sessionItems));
+      }
 
       if (aiCustom.action === "done") break;
 
       if (aiCustom.action !== "custom") {
-        const localParse = parseVoiceCommand(transcript, sessionItems);
-        if (localParse && "ambiguous" in localParse) {
-          const candidates = localParse.ambiguous.map((item) => item.name).join(", ");
-          const message = `That could be ${candidates}. Please say a more specific item name.`;
-          setVoiceNotice(message);
-          await safeSpeak(message);
-          continue;
-        }
-        if (localParse && "item" in localParse) {
-          aiCustom = {
-            action: "custom",
-            itemId: localParse.item.id,
-            itemName: localParse.item.name,
-            quantity: localParse.quantity,
-          };
-        } else {
-          setVoiceNotice("Could not match that item and count. Try the full item name plus a number.");
-          await safeSpeak("Didn't recognize that. Try again.");
-          continue;
-        }
-      }
-
-      if (aiCustom.action !== "custom") {
+        const message = "Could not match that item and count. Try the full item name plus a number.";
+        setVoiceNotice(message);
+        setStatusMessage(message);
         await safeSpeak("Didn't recognize that. Try again.");
         continue;
       }
 
       const item = sessionItems.find((it) => it.id === aiCustom.itemId) ?? null;
       if (!item) {
+        setVoiceNotice("The parsed item is not in the current location list. Try another item name.");
         await safeSpeak("Didn't recognize that. Try again.");
         continue;
       }
@@ -806,12 +833,14 @@ export default function VoiceCheck() {
       const quantity = aiCustom.quantity;
       setCustomMatchedItem(item);
       setCustomSpokenQty(quantity);
+      setStatusMessage(`Matched ${item.name}, count ${quantity}. Waiting for confirmation.`);
 
       if (!(await confirmSpokenCount(item, quantity))) {
         addResult({ item, expected: item.quantity, counted: null, diff: null, status: "skipped", adjustmentType: null });
         continue;
       }
 
+      setStatusMessage(`Saving ${item.name}, count ${quantity}...`);
       if (quantity === item.quantity) {
         vibrate(100);
         try {
@@ -823,12 +852,14 @@ export default function VoiceCheck() {
         }
         await safeSpeak("OK");
         addResult({ item, expected: item.quantity, counted: quantity, diff: 0, status: "verified", adjustmentType: null });
+        notifyCountSaved(`${item.name}: count ${quantity} verified and written to inventory history.`);
 
       } else if (quantity > item.quantity) {
         if (!(await confirmLargeChange(item, quantity))) {
           addResult({ item, expected: item.quantity, counted: null, diff: null, status: "skipped", adjustmentType: null });
           continue;
         }
+        setStatusMessage(`Saving ${item.name}, count ${quantity} as an adjustment...`);
         try {
           await saveAdjustment(item.id, quantity, "Adjustment", false);
         } catch {
@@ -837,11 +868,13 @@ export default function VoiceCheck() {
           continue;
         }
         addResult({ item, expected: item.quantity, counted: quantity, diff: quantity - item.quantity, status: "updated-higher", adjustmentType: "Adjustment" });
+        notifyCountSaved(`${item.name}: count updated to ${quantity} and written to inventory history.`);
         await safeSpeak(`${item.name}: ${quantity}. Saved.`);
 
       } else {
         setPendingCounted(quantity);
         setPhase("reason-speaking");
+        setStatusMessage(`${item.name} is below system count. Waiting for shortage reason.`);
         const reasonOk = await safeSpeak(
           `${item.name}: got ${quantity}, system count is ${item.quantity}. Why the shortage? Say: theft, spoilage, comp, return to warehouse, damaged, or missing from bin.`
         );
@@ -859,6 +892,7 @@ export default function VoiceCheck() {
           addResult({ item, expected: item.quantity, counted: null, diff: null, status: "skipped", adjustmentType: null });
           continue;
         }
+        setStatusMessage(`Saving ${item.name}, count ${quantity}, reason ${reason}...`);
         try {
           await saveAdjustment(item.id, quantity, reason, false);
         } catch {
@@ -868,6 +902,7 @@ export default function VoiceCheck() {
           continue;
         }
         addResult({ item, expected: item.quantity, counted: quantity, diff: quantity - item.quantity, status: "updated-lower", adjustmentType: reason });
+        notifyCountSaved(`${item.name}: count updated to ${quantity} with reason ${reason} and written to inventory history.`);
         vibrate([50, 50, 100]);
         await safeSpeak(`Saved as ${reason}.`);
         setPendingCounted(null);
@@ -883,7 +918,7 @@ export default function VoiceCheck() {
       await speak("Count complete.");
       setPhase("complete");
     }
-  }, [safeSpeak, safeListen, addResult, speak, acquireWakeLock, releaseWakeLock, notifySaveFailed, confirmLargeChange, confirmSpokenCount]);
+  }, [safeSpeak, safeListen, addResult, speak, acquireWakeLock, releaseWakeLock, notifySaveFailed, confirmLargeChange, confirmSpokenCount, notifyCountSaved]);
 
   /* ── Build queue & start ── */
   const buildQueue = useCallback((): Item[] => {
