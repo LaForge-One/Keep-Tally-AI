@@ -124,6 +124,18 @@ function parseReason(transcript: string): string {
   return "Adjustment";
 }
 
+function parseConfirmation(transcript: string): "yes" | "no" | "unknown" {
+  const t = transcript.toLowerCase().trim();
+  if (!t) return "unknown";
+  if (/\b(yes|yeah|yep|correct|right|confirmed|confirm|ok|okay|save|proceed|do it|that's right|that is right)\b/.test(t)) {
+    return "yes";
+  }
+  if (/\b(no|nope|cancel|wrong|incorrect|retry|try again|don't save|do not save|skip)\b/.test(t)) {
+    return "no";
+  }
+  return "unknown";
+}
+
 /* ── Item name + quantity parser for voice-driven custom mode ─────── */
 
 type ItemMatch =
@@ -547,6 +559,35 @@ export default function VoiceCheck() {
     return window.confirm(`${message}\n\nSave this count?`);
   }, [safeSpeak]);
 
+  const confirmSpokenCount = useCallback(async (item: Item, quantity: number) => {
+    const message = `I heard ${item.name}, count ${quantity}. Say yes to save, or no to try again.`;
+    setVoiceNotice(message);
+    setStatusMessage(message);
+    await safeSpeak(message);
+
+    setPhase("custom-listening");
+    setLastHeard("");
+    const confirmationTranscript = await safeListen(10000);
+    if (confirmationTranscript === null) return false;
+
+    const confirmation = parseConfirmation(confirmationTranscript);
+    if (confirmation === "yes") {
+      setVoiceNotice("");
+      return true;
+    }
+    if (confirmation === "no") {
+      const retryMessage = "Okay, not saved. Try that item again.";
+      setVoiceNotice(retryMessage);
+      await safeSpeak(retryMessage);
+      return false;
+    }
+
+    const unclearMessage = "I could not confirm that, so I did not save it. Please try again.";
+    setVoiceNotice(unclearMessage);
+    await safeSpeak(unclearMessage);
+    return false;
+  }, [safeListen, safeSpeak]);
+
   /* ── QUEUE-BASED session (All / Low-Stock / Category) ── */
   const runSession = useCallback(async (queue: Item[], startIndex: number) => {
     if (isRunningRef.current) return;
@@ -756,6 +797,11 @@ export default function VoiceCheck() {
       setCustomMatchedItem(item);
       setCustomSpokenQty(quantity);
 
+      if (!(await confirmSpokenCount(item, quantity))) {
+        addResult({ item, expected: item.quantity, counted: null, diff: null, status: "skipped", adjustmentType: null });
+        continue;
+      }
+
       if (quantity === item.quantity) {
         vibrate(100);
         try {
@@ -827,7 +873,7 @@ export default function VoiceCheck() {
       await speak("Count complete.");
       setPhase("complete");
     }
-  }, [safeSpeak, safeListen, addResult, speak, acquireWakeLock, releaseWakeLock, notifySaveFailed, confirmLargeChange]);
+  }, [safeSpeak, safeListen, addResult, speak, acquireWakeLock, releaseWakeLock, notifySaveFailed, confirmLargeChange, confirmSpokenCount]);
 
   /* ── Build queue & start ── */
   const buildQueue = useCallback((): Item[] => {

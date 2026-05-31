@@ -5,14 +5,15 @@
 1. The user opens `/voice-check`, selects a location, and chooses a count mode.
 2. For AI Voice mode, the app should move into the listening screen immediately after Start.
 3. The browser records microphone audio with `MediaRecorder`.
-4. The browser stops recording on silence, timeout, Pause, Finish, Skip, or Repeat.
+4. The browser stops recording on a seven-second silence gap, timeout, Pause, Finish, Skip, or Repeat.
 5. Normal silence creates no transcript and the session can continue.
 6. Manual stops must discard the current partial recording.
 7. The frontend uploads the audio blob to `POST /api/voice/transcribe`.
 8. The API converts browser audio to WAV with `ffmpeg`.
 9. The API sends the WAV file to the configured AI transcription endpoint.
 10. The transcript is parsed into item, count, reason, skip, or done.
-11. The result is saved as a verification or inventory adjustment.
+11. In AI Voice mode, the app repeats the parsed item and count for confirmation.
+12. The result is saved only after the operator confirms with yes, correct, okay, save, or a similar phrase.
 
 ## Known Failure Points
 
@@ -45,11 +46,14 @@
 - Click Finish while recording.
 - Click Skip while recording in queue mode.
 - Click Repeat while recording in queue mode.
-- Say nothing and wait for silence timeout.
+- Say nothing and wait for the seven-second end-of-utterance timeout.
 - Say `done` in custom mode.
 - Say an item name without a quantity.
 - Say a quantity without a recognizable item name.
 - Say an ambiguous item name.
+- Say a valid item and count, then say yes to confirm save.
+- Say a valid item and count, then say no to prevent save.
+- Say a valid item and count, then give an unclear confirmation.
 - Say a count that is much higher than the system count.
 - Say a count that is lower and provide a shrinkage reason.
 - AI transcription endpoint returns 502.
@@ -78,6 +82,24 @@ Expected:
 ```bash
 /usr/bin/ffmpeg
 ```
+
+## Voice Quality Settings
+
+Use these in `.env.vps-test` for a less robotic voice:
+
+```bash
+AI_TTS_VOICE=shimmer
+AI_TTS_INSTRUCTIONS=Use a warm, polite, natural human voice. Keep prompts brief, calm, and easy to understand for an inventory operator.
+```
+
+Recommended voice options:
+
+- `shimmer`: friendly, polite, lighter voice.
+- `nova`: clear, neutral, professional voice.
+- `onyx`: deeper male voice.
+- `echo`: lighter male voice.
+
+If LocalAI does not support the selected voice for the active `AI_TTS_MODEL`, the API will return a TTS error and the browser will fall back to browser speech.
 
 Check whether the deployed frontend is current:
 

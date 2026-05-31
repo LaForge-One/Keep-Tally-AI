@@ -26,6 +26,9 @@ export const openai = new OpenAI({
 const AUDIO_CHAT_MODEL = process.env.AI_AUDIO_CHAT_MODEL ?? "gpt-audio-mini";
 const TTS_MODEL = process.env.AI_TTS_MODEL ?? "gpt-4o-mini-tts";
 const TRANSCRIBE_MODEL = process.env.AI_TRANSCRIBE_MODEL ?? "gpt-4o-mini-transcribe";
+const DEFAULT_TTS_INSTRUCTIONS =
+  process.env.AI_TTS_INSTRUCTIONS ??
+  "Use a warm, polite, natural human voice. Keep prompts brief, calm, and easy to understand for an inventory operator.";
 
 export type AudioFormat = "wav" | "mp3" | "webm" | "mp4" | "ogg" | "unknown";
 
@@ -182,7 +185,7 @@ export async function textToSpeech(
   text: string,
   voice: "alloy" | "ash" | "ballad" | "coral" | "echo" | "fable" | "marin" | "nova" | "onyx" | "sage" | "shimmer" | "verse" | "cedar" = "alloy",
   format: "wav" | "mp3" | "flac" | "opus" | "pcm16" = "wav",
-  instructions = "Speak clearly and briefly for a warehouse inventory operator.",
+  instructions = DEFAULT_TTS_INSTRUCTIONS,
 ): Promise<Buffer> {
   const response = await openai.audio.speech.create({
     model: TTS_MODEL,

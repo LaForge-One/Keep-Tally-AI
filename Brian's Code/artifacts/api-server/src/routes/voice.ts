@@ -23,6 +23,11 @@ router.use(requireAccount, requireActiveMembership);
 const VOICE_FORMAT_TIMEOUT_MS = Number.parseInt(process.env.VOICE_FORMAT_TIMEOUT_MS ?? "10000", 10);
 const VOICE_TRANSCRIBE_TIMEOUT_MS = Number.parseInt(process.env.VOICE_TRANSCRIBE_TIMEOUT_MS ?? "25000", 10);
 const VOICE_TTS_TIMEOUT_MS = Number.parseInt(process.env.VOICE_TTS_TIMEOUT_MS ?? "8000", 10);
+const TTS_VOICES = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"] as const;
+type TtsVoice = (typeof TTS_VOICES)[number];
+const DEFAULT_TTS_VOICE: TtsVoice = TTS_VOICES.includes(process.env.AI_TTS_VOICE as TtsVoice)
+  ? (process.env.AI_TTS_VOICE as TtsVoice)
+  : "shimmer";
 
 class VoiceTimeoutError extends Error {
   constructor(message: string) {
@@ -92,7 +97,7 @@ router.post(
 ──────────────────────────────────────────────────────────────────── */
 const SpeakSchema = z.object({
   text: z.string().min(1).max(500),
-  voice: z.enum(["alloy", "echo", "fable", "onyx", "nova", "shimmer"]).optional().default("nova"),
+  voice: z.enum(TTS_VOICES).optional(),
 });
 
 router.post("/voice/speak", async (req: Request, res: Response) => {
@@ -102,7 +107,8 @@ router.post("/voice/speak", async (req: Request, res: Response) => {
     return;
   }
 
-  const { text, voice } = parsed.data;
+  const { text } = parsed.data;
+  const voice = parsed.data.voice ?? DEFAULT_TTS_VOICE;
 
   try {
     const audioBuffer = await withTimeout(

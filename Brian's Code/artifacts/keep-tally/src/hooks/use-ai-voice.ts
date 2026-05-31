@@ -3,6 +3,7 @@ import { useRef, useCallback, useEffect } from "react";
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const SPEAK_TIMEOUT_MS = 3500;
 const TRANSCRIBE_TIMEOUT_MS = 18000;
+const END_OF_UTTERANCE_SILENCE_MS = 7000;
 
 export type VoiceSupport = {
   hasSpeechRecognition: boolean;
@@ -58,7 +59,7 @@ export function getAIVoiceSupport(): VoiceSupport {
 }
 
 const SILENCE_THRESHOLD = 8;
-const SILENCE_DURATION_MS = 1400;
+const SILENCE_DURATION_MS = END_OF_UTTERANCE_SILENCE_MS;
 const MIN_RECORD_MS = 600;
 
 function createSilenceDetector(stream: MediaStream, onSilence: () => void) {
