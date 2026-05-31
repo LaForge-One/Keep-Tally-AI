@@ -42,7 +42,7 @@ import { InventoryScanner } from "@/components/inventory-scanner";
 import { toast } from "@/hooks/use-toast";
 import type { Item } from "@workspace/api-client-react";
 
-function StockBadge({ quantity, parLevel }: { quantity: number; parLevel: number }) {
+function StockBadge({ quantity, minQuantity, maxQuantity }: { quantity: number; minQuantity: number; maxQuantity: number }) {
   if (quantity <= 0) {
     return (
       <Badge className="bg-red-100 text-red-700 border border-red-200 hover:bg-red-100 font-medium text-xs">
@@ -50,10 +50,17 @@ function StockBadge({ quantity, parLevel }: { quantity: number; parLevel: number
       </Badge>
     );
   }
-  if (quantity <= parLevel) {
+  if (quantity < minQuantity) {
     return (
       <Badge className="bg-amber-100 text-amber-700 border border-amber-200 hover:bg-amber-100 font-medium text-xs">
         Low Stock
+      </Badge>
+    );
+  }
+  if (maxQuantity > 0 && quantity > maxQuantity) {
+    return (
+      <Badge className="bg-blue-100 text-blue-700 border border-blue-200 hover:bg-blue-100 font-medium text-xs">
+        Overstock
       </Badge>
     );
   }
@@ -119,8 +126,8 @@ export default function Inventory() {
       const matchesStatus =
         filterStatus === "All" ||
         (filterStatus === "out" && item.quantity <= 0) ||
-        (filterStatus === "low" && item.quantity > 0 && item.quantity <= item.parLevel) ||
-        (filterStatus === "ok" && item.quantity > item.parLevel);
+        (filterStatus === "low" && item.quantity > 0 && item.quantity < item.minQuantity) ||
+        (filterStatus === "ok" && item.quantity >= item.minQuantity && (item.maxQuantity <= 0 || item.quantity <= item.maxQuantity));
       return matchesSearch && matchesCat && matchesStatus;
     });
   }, [items, searchTerm, filterCategory, filterStatus]);
@@ -130,7 +137,7 @@ export default function Inventory() {
   const openAdjust = (item: Item) => { setAdjustingItem(item); setAdjustOpen(true); };
   const confirmDelete = (id: number) => { setItemToDelete(id); setDeleteConfirmOpen(true); };
 
-  const lowCount = items?.filter((i) => i.quantity > 0 && i.quantity <= i.parLevel).length ?? 0;
+  const lowCount = items?.filter((i) => i.quantity > 0 && i.quantity < i.minQuantity).length ?? 0;
   const outCount = items?.filter((i) => i.quantity <= 0).length ?? 0;
 
   return (
@@ -248,7 +255,8 @@ export default function Inventory() {
                   <TableHead className="font-semibold text-foreground">Location</TableHead>
                   <TableHead className="font-semibold text-foreground">Status</TableHead>
                   <TableHead className="font-semibold text-foreground text-right">Qty</TableHead>
-                  <TableHead className="font-semibold text-foreground text-right">Par</TableHead>
+                  <TableHead className="font-semibold text-foreground text-right">Min</TableHead>
+                  <TableHead className="font-semibold text-foreground text-right">Max</TableHead>
                   {hasAnyRowAction && <TableHead className="w-[80px]" />}
                 </TableRow>
               </TableHeader>
@@ -259,13 +267,16 @@ export default function Inventory() {
                     <TableCell className="text-muted-foreground text-sm">{item.category}</TableCell>
                     <TableCell className="text-muted-foreground text-sm">{item.location}</TableCell>
                     <TableCell>
-                      <StockBadge quantity={item.quantity} parLevel={item.parLevel} />
+                      <StockBadge quantity={item.quantity} minQuantity={item.minQuantity} maxQuantity={item.maxQuantity} />
                     </TableCell>
-                    <TableCell className={`text-right font-semibold tabular-nums ${item.quantity <= 0 ? "text-red-600" : item.quantity <= item.parLevel ? "text-amber-600" : ""}`}>
+                    <TableCell className={`text-right font-semibold tabular-nums ${item.quantity <= 0 ? "text-red-600" : item.quantity < item.minQuantity ? "text-amber-600" : item.maxQuantity > 0 && item.quantity > item.maxQuantity ? "text-blue-600" : ""}`}>
                       {item.quantity}
                     </TableCell>
                     <TableCell className="text-right text-muted-foreground tabular-nums text-sm">
-                      {item.parLevel}
+                      {item.minQuantity}
+                    </TableCell>
+                    <TableCell className="text-right text-muted-foreground tabular-nums text-sm">
+                      {item.maxQuantity}
                     </TableCell>
                     {hasAnyRowAction && (
                       <TableCell className="text-right pr-3">

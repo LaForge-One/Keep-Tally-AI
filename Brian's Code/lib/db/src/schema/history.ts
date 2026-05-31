@@ -26,6 +26,11 @@ export const historyTable = pgTable(
   (table) => ({
     accountLocationIdx: index("history_account_location_idx").on(table.accountId, table.locationId),
     accountCreatedAtIdx: index("history_account_created_at_idx").on(table.accountId, table.createdAt),
+    accountItemCreatedAtIdx: index("history_account_item_created_idx").on(
+      table.accountId,
+      table.itemId,
+      table.createdAt,
+    ),
   }),
 );
 

@@ -15,9 +15,13 @@ const itemSchema = z.object({
   name: z.string().min(1, "Name is required"),
   category: z.string().min(1, "Category is required"),
   quantity: z.coerce.number().min(0, "Quantity must be positive"),
-  parLevel: z.coerce.number().min(0, "Par level must be positive"),
+  minQuantity: z.coerce.number().min(0, "Minimum quantity must be positive"),
+  maxQuantity: z.coerce.number().min(0, "Maximum quantity must be positive"),
   location: z.string().min(1, "Location is required"),
   barcode: z.string().optional(),
+}).refine((data) => data.maxQuantity >= data.minQuantity, {
+  message: "Maximum quantity must be at least the minimum quantity",
+  path: ["maxQuantity"],
 });
 
 type ItemFormValues = z.infer<typeof itemSchema>;
@@ -48,7 +52,8 @@ export function ItemDialog({ open, onOpenChange, item, defaultLocation }: ItemDi
       name: "",
       category: "",
       quantity: 0,
-      parLevel: 0,
+      minQuantity: 0,
+      maxQuantity: 0,
       location: defaultLocation ?? "",
       barcode: "",
     },
@@ -61,7 +66,8 @@ export function ItemDialog({ open, onOpenChange, item, defaultLocation }: ItemDi
         name: displayItem.name,
         category: displayItem.category,
         quantity: displayItem.quantity,
-        parLevel: displayItem.parLevel,
+        minQuantity: displayItem.minQuantity ?? displayItem.parLevel,
+        maxQuantity: displayItem.maxQuantity ?? displayItem.parLevel,
         location: displayItem.location,
         barcode: displayItem.barcode ?? "",
       });
@@ -70,7 +76,8 @@ export function ItemDialog({ open, onOpenChange, item, defaultLocation }: ItemDi
         name: "",
         category: "",
         quantity: 0,
-        parLevel: 0,
+        minQuantity: 0,
+        maxQuantity: 0,
         location: defaultLocation ?? "",
         barcode: "",
       });
@@ -113,6 +120,7 @@ export function ItemDialog({ open, onOpenChange, item, defaultLocation }: ItemDi
   const onSubmit = (data: ItemFormValues) => {
     const payload = {
       ...data,
+      parLevel: data.minQuantity,
       barcode: data.barcode?.trim() || null,
     };
     if (isEditing && item) {
@@ -191,10 +199,10 @@ export function ItemDialog({ open, onOpenChange, item, defaultLocation }: ItemDi
               />
               <FormField
                 control={form.control}
-                name="parLevel"
+                name="minQuantity"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Par Level</FormLabel>
+                    <FormLabel>Minimum Quantity</FormLabel>
                     <FormControl>
                       <Input type="number" min="0" {...field} />
                     </FormControl>
@@ -203,6 +211,20 @@ export function ItemDialog({ open, onOpenChange, item, defaultLocation }: ItemDi
                 )}
               />
             </div>
+
+            <FormField
+              control={form.control}
+              name="maxQuantity"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Maximum Quantity</FormLabel>
+                  <FormControl>
+                    <Input type="number" min="0" {...field} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
 
             <FormField
               control={form.control}

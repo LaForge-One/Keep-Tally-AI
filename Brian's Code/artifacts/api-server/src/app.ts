@@ -12,6 +12,10 @@ import { errorBody, getErrorMessage } from "./lib/http-errors";
 
 const app: Express = express();
 
+if (process.env.TRUST_PROXY === "true") {
+  app.set("trust proxy", 1);
+}
+
 const ALLOWED_ORIGINS: string[] = [];
 
 if (process.env.REPLIT_DEV_DOMAIN) {

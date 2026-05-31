@@ -289,6 +289,8 @@ router.post("/import/preview", upload.single("file"), async (req, res) => {
         location: item.location,
         currentQty: item.quantity,
         parLevel: item.parLevel,
+        minQuantity: item.minQuantity,
+        maxQuantity: item.maxQuantity,
         projectedQty: Math.max(0, item.quantity - Math.round(data.qty)),
         suggestedPar: null, // computed client-side or on apply
       });
@@ -380,31 +382,37 @@ router.post("/import/apply", async (req, res) => {
       results.push({ itemId, itemName: item.name, previousQty: item.quantity, newQty, change: newQty - item.quantity });
 
     } else if (mode === "par") {
-      // Weekly velocity → par = velocity × restockDays
+      // Weekly velocity -> minimum = velocity x restockDays, maximum = two cycles.
       const weeklyVelocity = qtySold / 7;
       const suggestedPar = Math.ceil(weeklyVelocity * restockDays);
+      const suggestedMax = Math.max(suggestedPar, suggestedPar * 2, item.quantity);
       if (suggestedPar > 0) {
         await db.update(itemsTable)
-          .set({ parLevel: suggestedPar, lastUpdated: new Date() })
+          .set({
+            parLevel: suggestedPar,
+            minQuantity: suggestedPar,
+            maxQuantity: suggestedMax,
+            lastUpdated: new Date(),
+          })
           .where(and(eq(itemsTable.id, itemId), eq(itemsTable.accountId, req.account!.id)));
-        if (suggestedPar !== item.parLevel) {
+        if (suggestedPar !== item.minQuantity || suggestedMax !== item.maxQuantity) {
           await db.insert(historyTable).values({
             accountId: req.account!.id,
             locationId: item.locationId,
             itemId: item.id,
             itemName: item.name,
             action: "import",
-            field: "parLevel",
-            previousValue: String(item.parLevel),
-            newValue: String(suggestedPar),
-            note: `CSV import calculated par from ${qtySold} sold over ${restockDays} restock days`,
+            field: "stockRange",
+            previousValue: `${item.minQuantity}-${item.maxQuantity}`,
+            newValue: `${suggestedPar}-${suggestedMax}`,
+            note: `CSV import calculated min/max stock from ${qtySold} sold over ${restockDays} restock days`,
             source: "import",
             performedBy: req.authUser?.displayName ?? null,
             performedByRole: req.authUser?.role ?? null,
             location: item.location,
           });
         }
-        results.push({ itemId, itemName: item.name, previousPar: item.parLevel, newPar: suggestedPar });
+        results.push({ itemId, itemName: item.name, previousMin: item.minQuantity, newMin: suggestedPar, previousMax: item.maxQuantity, newMax: suggestedMax });
       }
     }
   }

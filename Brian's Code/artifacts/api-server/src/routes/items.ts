@@ -25,17 +25,51 @@ import { canAccessLocation, canViewAllLocations, requireAccount, requireActiveMe
 const router: IRouter = Router();
 
 function serializeItem(row: ItemRow) {
+  const minQuantity = row.minQuantity ?? row.parLevel;
+  const maxQuantity = row.maxQuantity ?? Math.max(row.parLevel, row.quantity, minQuantity);
   return {
     id: row.id,
     name: row.name,
     category: row.category,
     quantity: row.quantity,
     parLevel: row.parLevel,
+    minQuantity,
+    maxQuantity,
     location: row.location,
     barcode: row.barcode ?? null,
     lastUpdated: row.lastUpdated.toISOString(),
     createdAt: row.createdAt.toISOString(),
   };
+}
+
+function normalizeStockRange(input: {
+  quantity?: number;
+  parLevel?: number;
+  minQuantity?: number;
+  maxQuantity?: number;
+}): { parLevel: number; minQuantity: number; maxQuantity: number } {
+  const minQuantity = Math.max(0, Math.floor(input.minQuantity ?? input.parLevel ?? 0));
+  const maxSeed = input.maxQuantity ?? input.parLevel ?? input.quantity ?? minQuantity;
+  const maxQuantity = Math.max(minQuantity, Math.floor(maxSeed));
+  return {
+    parLevel: minQuantity,
+    minQuantity,
+    maxQuantity,
+  };
+}
+
+function nextStockRange(
+  before: ItemRow,
+  input: { quantity?: number; parLevel?: number; minQuantity?: number; maxQuantity?: number },
+): Partial<Pick<ItemRow, "parLevel" | "minQuantity" | "maxQuantity">> {
+  const nextMin = input.minQuantity ?? input.parLevel ?? before.minQuantity ?? before.parLevel;
+  const nextMax = input.maxQuantity ?? before.maxQuantity ?? Math.max(before.parLevel, before.quantity, nextMin);
+  const normalized = normalizeStockRange({
+    quantity: input.quantity ?? before.quantity,
+    minQuantity: nextMin,
+    maxQuantity: nextMax,
+  });
+  return normalized;
 }
 
 function allowedLocationIds(req: Request): number[] {
@@ -159,6 +193,8 @@ function serializeWarehouseLookupItem(row: WarehouseItemRow) {
     category: row.category,
     quantity: row.quantity,
     parLevel: row.minPar,
+    minQuantity: row.minPar,
+    maxQuantity: row.maxPar,
     minPar: row.minPar,
     maxPar: row.maxPar,
     reorderPoint: row.reorderPoint,
@@ -491,6 +527,7 @@ router.post("/items", requirePermission("edit_store_inventory"), async (req, res
   const resolvedLocation = await resolveLocationByName(req, res, parsed.data.location);
   if (!resolvedLocation) return;
 
+  const stockRange = normalizeStockRange(parsed.data);
   const [created] = await db
     .insert(itemsTable)
     .values({
@@ -499,7 +536,7 @@ router.post("/items", requirePermission("edit_store_inventory"), async (req, res
       name: parsed.data.name,
       category: parsed.data.category,
       quantity: parsed.data.quantity,
-      parLevel: parsed.data.parLevel,
+      ...stockRange,
       location: resolvedLocation.name,
       barcode: parsed.data.barcode ?? null,
     })
@@ -594,15 +631,35 @@ router.patch("/items/:id", requirePermission("edit_store_inventory"), async (req
     });
   }
   if (
-    body.data.parLevel !== undefined &&
-    body.data.parLevel !== before.parLevel
+    body.data.parLevel !== undefined ||
+    body.data.minQuantity !== undefined ||
+    body.data.maxQuantity !== undefined
   ) {
-    updates.parLevel = body.data.parLevel;
-    changes.push({
-      field: "parLevel",
-      from: String(before.parLevel),
-      to: String(body.data.parLevel),
-    });
+    const stockRange = nextStockRange(before, body.data);
+    if (stockRange.minQuantity !== before.minQuantity) {
+      updates.minQuantity = stockRange.minQuantity;
+      changes.push({
+        field: "minQuantity",
+        from: String(before.minQuantity),
+        to: String(stockRange.minQuantity),
+      });
+    }
+    if (stockRange.maxQuantity !== before.maxQuantity) {
+      updates.maxQuantity = stockRange.maxQuantity;
+      changes.push({
+        field: "maxQuantity",
+        from: String(before.maxQuantity),
+        to: String(stockRange.maxQuantity),
+      });
+    }
+    if (stockRange.parLevel !== before.parLevel) {
+      updates.parLevel = stockRange.parLevel;
+      changes.push({
+        field: "parLevel",
+        from: String(before.parLevel),
+        to: String(stockRange.parLevel),
+      });
+    }
   }
   if (newLocation) {
     updates.location = newLocation.name;
@@ -727,7 +784,7 @@ router.post("/items/:id/verify", requirePermission("use_voice_mode"), async (req
     field: "quantity",
     previousValue: String(item.quantity),
     newValue: String(item.quantity),
-    note: `Voice Count - verified ${item.quantity}/${item.parLevel} par at ${item.location}`,
+    note: `Voice Count - verified ${item.quantity} at ${item.location}; range ${item.minQuantity}-${item.maxQuantity}`,
     source: "voice",
     performedBy: req.authUser?.displayName ?? null,
     performedByRole: req.authUser?.role ?? null,

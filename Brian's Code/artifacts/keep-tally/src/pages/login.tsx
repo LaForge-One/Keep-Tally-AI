@@ -17,12 +17,21 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    const formData = new FormData(e.currentTarget);
+    const submittedUsername = String(formData.get("username") ?? "").trim();
+    const submittedPassword = String(formData.get("password") ?? "");
+
     setError(null);
+    if (!submittedUsername || !submittedPassword) {
+      setError("Enter both username and password.");
+      return;
+    }
+
     setLoading(true);
     try {
-      const result = await login(username, password);
+      const result = await login(submittedUsername, submittedPassword);
       if (result.mustChangePassword) {
         setLocation("/change-password");
       } else {
@@ -48,6 +57,7 @@ export default function LoginPage() {
               <Label htmlFor="username">Username</Label>
               <Input
                 id="username"
+                name="username"
                 autoCapitalize="none"
                 autoCorrect="off"
                 autoComplete="username"
@@ -62,6 +72,7 @@ export default function LoginPage() {
               <div className="relative">
                 <Input
                   id="password"
+                  name="password"
                   type={showPass ? "text" : "password"}
                   autoComplete="current-password"
                   value={password}
@@ -73,8 +84,10 @@ export default function LoginPage() {
                 <button
                   type="button"
                   onClick={() => setShowPass((v) => !v)}
+                  aria-label={showPass ? "Hide password" : "Show password"}
+                  aria-pressed={showPass}
+                  disabled={loading}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                  tabIndex={-1}
                 >
                   {showPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
@@ -87,7 +100,7 @@ export default function LoginPage() {
               </p>
             )}
 
-            <Button type="submit" disabled={loading || !username || !password} className="mt-1 gap-2">
+            <Button type="submit" disabled={loading} className="mt-1 gap-2">
               <Lock className="w-4 h-4" />
               {loading ? "Signing in…" : "Sign In"}
             </Button>

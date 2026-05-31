@@ -28,7 +28,10 @@ export const ListItemsResponseItem = zod.object({
   category: zod.string(),
   quantity: zod.number(),
   parLevel: zod.number(),
+  minQuantity: zod.number(),
+  maxQuantity: zod.number(),
   location: zod.string(),
+  barcode: zod.string().nullish(),
   lastUpdated: zod.coerce.date(),
   createdAt: zod.coerce.date(),
 });
@@ -41,12 +44,16 @@ export const ListItemsResponse = zod.array(ListItemsResponseItem);
 export const createItemBodyQuantityMin = 0;
 
 export const createItemBodyParLevelMin = 0;
+export const createItemBodyMinQuantityMin = 0;
+export const createItemBodyMaxQuantityMin = 0;
 
 export const CreateItemBody = zod.object({
   name: zod.string().min(1),
   category: zod.string().min(1),
   quantity: zod.number().min(createItemBodyQuantityMin),
-  parLevel: zod.number().min(createItemBodyParLevelMin),
+  parLevel: zod.number().min(createItemBodyParLevelMin).optional(),
+  minQuantity: zod.number().min(createItemBodyMinQuantityMin).optional(),
+  maxQuantity: zod.number().min(createItemBodyMaxQuantityMin).optional(),
   location: zod.string().min(1),
   barcode: zod.string().nullish(),
 });
@@ -61,7 +68,10 @@ export const GetItemResponse = zod.object({
   category: zod.string(),
   quantity: zod.number(),
   parLevel: zod.number(),
+  minQuantity: zod.number(),
+  maxQuantity: zod.number(),
   location: zod.string(),
+  barcode: zod.string().nullish(),
   lastUpdated: zod.coerce.date(),
   createdAt: zod.coerce.date(),
 });
@@ -73,12 +83,16 @@ export const UpdateItemParams = zod.object({
 export const updateItemBodyQuantityMin = 0;
 
 export const updateItemBodyParLevelMin = 0;
+export const updateItemBodyMinQuantityMin = 0;
+export const updateItemBodyMaxQuantityMin = 0;
 
 export const UpdateItemBody = zod.object({
   name: zod.string().min(1).optional(),
   category: zod.string().min(1).optional(),
   quantity: zod.number().min(updateItemBodyQuantityMin).optional(),
   parLevel: zod.number().min(updateItemBodyParLevelMin).optional(),
+  minQuantity: zod.number().min(updateItemBodyMinQuantityMin).optional(),
+  maxQuantity: zod.number().min(updateItemBodyMaxQuantityMin).optional(),
   location: zod.string().min(1).optional(),
   barcode: zod.string().nullish(),
 });
@@ -89,7 +103,10 @@ export const UpdateItemResponse = zod.object({
   category: zod.string(),
   quantity: zod.number(),
   parLevel: zod.number(),
+  minQuantity: zod.number(),
+  maxQuantity: zod.number(),
   location: zod.string(),
+  barcode: zod.string().nullish(),
   lastUpdated: zod.coerce.date(),
   createdAt: zod.coerce.date(),
 });
@@ -153,7 +170,7 @@ export const RunCommandResponse = zod.object({
 });
 
 /**
- * @summary Items at or below par with units needed to refill
+ * @summary Items below minimum stock with units needed to refill toward maximum
  */
 export const GetRestockListQueryParams = zod.object({
   location: zod.coerce.string().optional().describe("Filter by location name"),
@@ -171,7 +188,10 @@ export const GetRestockListResponse = zod.object({
         category: zod.string(),
         quantity: zod.number(),
         parLevel: zod.number(),
+        minQuantity: zod.number(),
+        maxQuantity: zod.number(),
         location: zod.string(),
+        barcode: zod.string().nullish(),
         lastUpdated: zod.coerce.date(),
         createdAt: zod.coerce.date(),
       }),
@@ -204,7 +224,10 @@ export const GetDashboardSummaryResponse = zod.object({
       category: zod.string(),
       quantity: zod.number(),
       parLevel: zod.number(),
+      minQuantity: zod.number(),
+      maxQuantity: zod.number(),
       location: zod.string(),
+      barcode: zod.string().nullish(),
       lastUpdated: zod.coerce.date(),
       createdAt: zod.coerce.date(),
     }),

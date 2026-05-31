@@ -16,6 +16,7 @@ import {
   Search,
   X,
   Menu,
+  Bot,
 } from "lucide-react";
 import {
   Select,
@@ -234,6 +235,7 @@ export function Layout({ children }: { children: ReactNode }) {
     { path: "/orders", label: "Pick Lists", icon: ClipboardList },
     { path: "/route-sheets", label: "Route Sheets", icon: ClipboardList },
     { path: "/restock", label: "Transfers", icon: RefreshCw },
+    { path: "/agents", label: "Agent Insights", icon: Bot },
     { path: "/history", label: "Reports", icon: BarChart2 },
   ];
 

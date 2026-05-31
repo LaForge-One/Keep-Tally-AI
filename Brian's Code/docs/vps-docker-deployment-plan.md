@@ -54,6 +54,8 @@ CORS_ORIGIN=https://test.your-domain.example
 SESSION_SECRET=generate-a-long-random-secret-at-least-32-chars
 INITIAL_ADMIN_PASSWORD=temporary-bootstrap-password
 WEB_DIST_DIR=/app/artifacts/keep-tally/dist/public
+AUTH_COOKIE_SECURE=auto
+TRUST_PROXY=true
 ```
 
 AI credentials are intentionally optional for this pre-credential phase:
@@ -155,6 +157,25 @@ Proxy requirements:
 - Forward `Host`, `X-Forwarded-Proto`, and `X-Forwarded-For`.
 - Proxy `/` and `/api/*` to the same app container.
 - Keep `CORS_ORIGIN` aligned to the public HTTPS origin.
+
+For direct HTTP testing on `http://SERVER_IP:3000`, use:
+
+```env
+AUTH_COOKIE_SECURE=false
+TRUST_PROXY=false
+```
+
+When the app is behind HTTPS through a reverse proxy, use:
+
+```env
+AUTH_COOKIE_SECURE=auto
+TRUST_PROXY=true
+```
+
+`AUTH_COOKIE_SECURE=auto` sets secure cookies only when the request is actually
+HTTPS. Browsers do not store `Secure` cookies over plain HTTP, so forcing secure
+cookies before TLS is active makes sign-in look broken even when the login API
+returns success.
 
 ## Preflight Checks
 

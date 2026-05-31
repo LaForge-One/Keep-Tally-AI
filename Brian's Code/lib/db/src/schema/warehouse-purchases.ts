@@ -25,6 +25,11 @@ export const warehousePurchasesTable = pgTable(
   (table) => ({
     accountWarehouseIdx: index("warehouse_purchases_account_warehouse_idx").on(table.accountId, table.warehouseId),
     accountCreatedAtIdx: index("warehouse_purchases_account_created_at_idx").on(table.accountId, table.createdAt),
+    accountItemCreatedAtIdx: index("warehouse_purchases_account_item_created_idx").on(
+      table.accountId,
+      table.warehouseItemId,
+      table.createdAt,
+    ),
   }),
 );
 

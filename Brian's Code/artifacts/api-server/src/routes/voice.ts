@@ -13,11 +13,42 @@ import {
   requireActiveMembership,
 } from "../middleware/auth";
 import { AI_LIMITS, AI_MODELS } from "../lib/ai-config";
+import { getErrorMessage } from "../lib/http-errors";
 
 const router: IRouter = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
 router.use(requireAccount, requireActiveMembership);
+
+const VOICE_FORMAT_TIMEOUT_MS = Number.parseInt(process.env.VOICE_FORMAT_TIMEOUT_MS ?? "10000", 10);
+const VOICE_TRANSCRIBE_TIMEOUT_MS = Number.parseInt(process.env.VOICE_TRANSCRIBE_TIMEOUT_MS ?? "25000", 10);
+const VOICE_TTS_TIMEOUT_MS = Number.parseInt(process.env.VOICE_TTS_TIMEOUT_MS ?? "8000", 10);
+
+class VoiceTimeoutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "VoiceTimeoutError";
+  }
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new VoiceTimeoutError(message)), timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
+function voiceErrorStatus(err: unknown) {
+  return err instanceof VoiceTimeoutError ? 504 : 502;
+}
+
+function voiceErrorDetails(err: unknown) {
+  if (process.env.NODE_ENV === "production") return undefined;
+  return getErrorMessage(err);
+}
 
 /* ── POST /voice/transcribe ─────────────────────────────────────────
    Accepts audio file upload, returns transcript.
@@ -34,12 +65,24 @@ router.post(
 
     try {
       const audioBuffer = req.file.buffer;
-      const { buffer, format } = await ensureCompatibleFormat(audioBuffer);
-      const transcript = await speechToText(buffer, format);
+      const { buffer, format } = await withTimeout(
+        ensureCompatibleFormat(audioBuffer),
+        VOICE_FORMAT_TIMEOUT_MS,
+        "Audio format conversion timed out",
+      );
+      const transcript = await withTimeout(
+        speechToText(buffer, format),
+        VOICE_TRANSCRIBE_TIMEOUT_MS,
+        "Voice transcription timed out",
+      );
       res.json({ transcript: transcript.trim() });
     } catch (err) {
       logger.error({ err, requestId: req.id }, "Voice transcription failed");
-      res.status(502).json({ error: "Transcription service failed", requestId: req.id });
+      res.status(voiceErrorStatus(err)).json({
+        error: err instanceof VoiceTimeoutError ? err.message : "Transcription service failed",
+        requestId: req.id,
+        details: voiceErrorDetails(err),
+      });
     }
   },
 );
@@ -62,13 +105,21 @@ router.post("/voice/speak", async (req: Request, res: Response) => {
   const { text, voice } = parsed.data;
 
   try {
-    const audioBuffer = await textToSpeech(text, voice, "wav");
+    const audioBuffer = await withTimeout(
+      textToSpeech(text, voice, "wav"),
+      VOICE_TTS_TIMEOUT_MS,
+      "Text-to-speech timed out",
+    );
     res.setHeader("Content-Type", "audio/wav");
     res.setHeader("Content-Length", audioBuffer.length);
     res.send(audioBuffer);
   } catch (err) {
     logger.error({ err, requestId: req.id }, "Voice text-to-speech failed");
-    res.status(502).json({ error: "Text-to-speech service failed", requestId: req.id });
+    res.status(voiceErrorStatus(err)).json({
+      error: err instanceof VoiceTimeoutError ? err.message : "Text-to-speech service failed",
+      requestId: req.id,
+      details: voiceErrorDetails(err),
+    });
   }
 });
 
@@ -85,6 +136,8 @@ const ItemSchema = z.object({
   id: z.number(),
   name: z.string(),
   parLevel: z.number(),
+  minQuantity: z.number().optional(),
+  maxQuantity: z.number().optional(),
 });
 
 const ParseSchema = z.object({
@@ -93,6 +146,8 @@ const ParseSchema = z.object({
   mode: z.enum(["quantity", "reason", "custom"]).default("custom"),
   currentItemName: z.string().optional(),
   currentParLevel: z.number().optional(),
+  currentMinQuantity: z.number().optional(),
+  currentMaxQuantity: z.number().optional(),
 });
 
 type ParseResult =
@@ -205,10 +260,13 @@ function buildPrompt(
   items: z.infer<typeof ItemSchema>[],
   currentItemName?: string,
   currentParLevel?: number,
+  currentMinQuantity?: number,
+  currentMaxQuantity?: number,
 ): string {
   if (mode === "quantity") {
     return `You are parsing a voice inventory response.
-The operator was asked how many of "${currentItemName}" (expected: ${currentParLevel}) they see.
+The operator was asked how many of "${currentItemName}" they see.
+The stock range is minimum ${currentMinQuantity ?? currentParLevel ?? 0} and maximum ${currentMaxQuantity ?? currentParLevel ?? 0}.
 Transcript: "${transcript}"
 
 Return ONLY valid JSON, no other text.
@@ -250,7 +308,11 @@ anything else → {"action":"reason","reason":"Adjustment"}`;
   }
 
   // mode === "custom"
-  const itemList = items.slice(0, 80).map((it) => `${it.id}:"${it.name}" (par ${it.parLevel})`).join(", ");
+  const itemList = items.slice(0, 80).map((it) => {
+    const min = it.minQuantity ?? it.parLevel;
+    const max = it.maxQuantity ?? it.parLevel;
+    return `${it.id}:"${it.name}" (range ${min}-${max})`;
+  }).join(", ");
   return `You are an inventory assistant parsing a voice command.
 The operator says an item name and a quantity count.
 Transcript: "${transcript}"
@@ -277,7 +339,15 @@ router.post("/voice/parse", async (req: Request, res: Response) => {
     return;
   }
 
-  const { transcript, items, mode, currentItemName, currentParLevel } = parsed.data;
+  const {
+    transcript,
+    items,
+    mode,
+    currentItemName,
+    currentParLevel,
+    currentMinQuantity,
+    currentMaxQuantity,
+  } = parsed.data;
 
   if (!transcript.trim()) {
     const result: ParseResult = { action: "unknown" };
@@ -300,7 +370,15 @@ router.post("/voice/parse", async (req: Request, res: Response) => {
     }
 
     const allowedItems = mode === "custom" ? await filterAllowedVoiceItems(req, items) : items;
-    const prompt = buildPrompt(transcript, mode, allowedItems, currentItemName, currentParLevel);
+    const prompt = buildPrompt(
+      transcript,
+      mode,
+      allowedItems,
+      currentItemName,
+      currentParLevel,
+      currentMinQuantity,
+      currentMaxQuantity,
+    );
 
     const response = await openai.chat.completions.create({
       model: AI_MODELS.voiceParser,

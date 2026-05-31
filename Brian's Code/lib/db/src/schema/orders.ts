@@ -40,6 +40,7 @@ export const orderItemsTable = pgTable(
   },
   (table) => ({
     accountOrderIdx: index("order_items_account_order_idx").on(table.accountId, table.orderId),
+    accountItemIdx: index("order_items_account_item_idx").on(table.accountId, table.itemId),
   }),
 );
 

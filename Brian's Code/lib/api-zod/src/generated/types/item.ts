@@ -12,6 +12,8 @@ export interface Item {
   category: string;
   quantity: number;
   parLevel: number;
+  minQuantity: number;
+  maxQuantity: number;
   location: string;
   barcode?: string | null;
   lastUpdated: Date;

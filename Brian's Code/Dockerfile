@@ -31,6 +31,10 @@ ENV WEB_DIST_DIR=/app/artifacts/keep-tally/dist/public
 
 RUN corepack enable
 
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ffmpeg \
+  && rm -rf /var/lib/apt/lists/*
+
 COPY --from=build /app /app
 
 EXPOSE 3000

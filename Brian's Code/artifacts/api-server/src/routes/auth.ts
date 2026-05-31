@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type CookieOptions, type Request } from "express";
 import { z } from "zod";
 import { signToken } from "../lib/auth-helpers";
 import { authenticateUser, changeUserPassword } from "../services/auth-service";
@@ -6,13 +6,23 @@ import { requireAuth } from "../middleware/auth";
 
 const router = Router();
 const COOKIE_NAME = "kt_token";
-const COOKIE_OPTS = {
+
+function shouldUseSecureCookies(req: Request): boolean {
+  const mode = process.env.AUTH_COOKIE_SECURE ?? "auto";
+  if (mode === "true") return true;
+  if (mode === "false") return false;
+  return req.secure || req.headers["x-forwarded-proto"] === "https";
+}
+
+function cookieOptions(req: Request): CookieOptions {
+  return {
   httpOnly: true,
   sameSite: "lax" as const,
   maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-  secure: process.env.NODE_ENV === "production",
+    secure: shouldUseSecureCookies(req),
   path: "/",
-};
+  };
+}
 
 /* ── POST /auth/login ── */
 router.post("/auth/login", async (req, res) => {
@@ -31,7 +41,7 @@ router.post("/auth/login", async (req, res) => {
   }
 
   const token = signToken(user.id);
-  res.cookie(COOKIE_NAME, token, COOKIE_OPTS);
+  res.cookie(COOKIE_NAME, token, cookieOptions(req));
 
   res.json({
     user: {
@@ -47,8 +57,13 @@ router.post("/auth/login", async (req, res) => {
 });
 
 /* ── POST /auth/logout ── */
-router.post("/auth/logout", (_req, res) => {
-  res.clearCookie(COOKIE_NAME, { path: "/" });
+router.post("/auth/logout", (req, res) => {
+  res.clearCookie(COOKIE_NAME, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: shouldUseSecureCookies(req),
+    path: "/",
+  });
   res.json({ ok: true });
 });
 

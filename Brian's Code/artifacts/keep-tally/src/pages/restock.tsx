@@ -54,7 +54,7 @@ export default function RestockPage() {
       <div className="space-y-5">
         <PageHeader
           title="Restock / Transfers"
-          description="Items at or below par level — ready for your next supplier order"
+          description="Items below minimum stock, with transfer quantities to refill toward maximum"
           actions={
             <div className="flex items-center gap-2">
               {canImport && (
@@ -99,7 +99,7 @@ export default function RestockPage() {
             <CheckCircle2 className="w-12 h-12 mx-auto text-emerald-500 mb-3" />
             <h2 className="text-xl font-semibold">All stocked up!</h2>
             <p className="text-muted-foreground mt-1 text-sm">
-              Every item is at or above its par level. Nothing to reorder right now.
+              Every item is within its minimum and maximum stock range. Nothing to reorder right now.
             </p>
           </div>
         ) : (
@@ -125,7 +125,8 @@ export default function RestockPage() {
                         <TableHead className="pl-4 font-semibold text-foreground">Item</TableHead>
                         <TableHead className="font-semibold text-foreground">Location</TableHead>
                         <TableHead className="font-semibold text-foreground text-right">Current</TableHead>
-                        <TableHead className="font-semibold text-foreground text-right">Par</TableHead>
+                        <TableHead className="font-semibold text-foreground text-right">Min</TableHead>
+                        <TableHead className="font-semibold text-foreground text-right">Max</TableHead>
                         <TableHead className="font-semibold text-foreground text-right pr-4">Need</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -150,7 +151,10 @@ export default function RestockPage() {
                               {item.quantity}
                             </TableCell>
                             <TableCell className="text-right text-muted-foreground tabular-nums text-sm">
-                              {item.parLevel}
+                              {item.minQuantity}
+                            </TableCell>
+                            <TableCell className="text-right text-muted-foreground tabular-nums text-sm">
+                              {item.maxQuantity}
                             </TableCell>
                             <TableCell className="text-right pr-4">
                               <Badge className={`font-bold tabular-nums ${isOut ? "bg-red-600 text-white hover:bg-red-600" : "bg-amber-500 text-white hover:bg-amber-500"}`}>

@@ -644,6 +644,8 @@ router.post("/warehouse/:id/transfer", requirePermission("transfer_inventory"), 
       location: resolvedStoreLocation.name,
       quantity: unitsTransferred,
       parLevel: parLevel ?? 0,
+      minQuantity: parLevel ?? 0,
+      maxQuantity: Math.max(parLevel ?? 0, unitsTransferred, (parLevel ?? 0) * 2),
       barcode: whItem.barcode ?? undefined,
     }).returning();
     resolvedStoreItemId = newStoreItem!.id;

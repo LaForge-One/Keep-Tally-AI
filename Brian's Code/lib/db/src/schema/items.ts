@@ -12,6 +12,8 @@ export const itemsTable = pgTable(
     category: text("category").notNull(),
     quantity: integer("quantity").notNull().default(0),
     parLevel: integer("par_level").notNull().default(0),
+    minQuantity: integer("min_quantity").notNull().default(0),
+    maxQuantity: integer("max_quantity").notNull().default(0),
     location: text("location").notNull(),
     barcode: text("barcode"),
     lastUpdated: timestamp("last_updated", { withTimezone: true })
@@ -26,6 +28,8 @@ export const itemsTable = pgTable(
     accountLocationNameIdx: index("items_account_location_name_idx").on(table.accountId, table.locationId, table.name),
     accountLegacyLocationNameIdx: index("items_account_legacy_location_name_idx").on(table.accountId, table.location, table.name),
     accountBarcodeIdx: index("items_account_barcode_idx").on(table.accountId, table.barcode),
+    accountLocationMinQtyIdx: index("items_account_location_min_qty_idx").on(table.accountId, table.locationId, table.minQuantity),
+    accountLocationMaxQtyIdx: index("items_account_location_max_qty_idx").on(table.accountId, table.locationId, table.maxQuantity),
   }),
 );
 

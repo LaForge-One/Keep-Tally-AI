@@ -22,6 +22,11 @@ export const scanLogTable = pgTable(
   (table) => ({
     accountLocationIdx: index("scan_log_account_location_idx").on(table.accountId, table.locationId),
     accountCreatedAtIdx: index("scan_log_account_created_at_idx").on(table.accountId, table.createdAt),
+    accountItemCreatedAtIdx: index("scan_log_account_item_created_idx").on(
+      table.accountId,
+      table.itemId,
+      table.createdAt,
+    ),
   }),
 );
 

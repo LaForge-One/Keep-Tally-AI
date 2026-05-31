@@ -5,7 +5,7 @@ import { useAuth } from "@/contexts/auth-context";
 import { NoPermissionPage } from "@/components/permission-guard";
 import { getListItemsQueryKey, useListItems } from "@workspace/api-client-react";
 import { useSelectedLocation, LOCATIONS } from "@/contexts/location-context";
-import { useAIVoice, getAIVoiceSupport, type ListenResult } from "@/hooks/use-ai-voice";
+import { useAIVoice, getAIVoiceSupport, type ListenResult, type MicrophonePrecheckResult } from "@/hooks/use-ai-voice";
 import { toast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import {
@@ -217,8 +217,8 @@ function parseVoiceCommand(transcript: string, items: Item[]): { item: Item; qua
 }
 
 function isLargeQuantityChange(item: Item, quantity: number): boolean {
-  const unitDelta = Math.abs(quantity - item.parLevel);
-  return unitDelta >= LARGE_DELTA_MIN_UNITS || quantity >= item.parLevel * LARGE_DELTA_MULTIPLIER;
+  const unitDelta = Math.abs(quantity - item.quantity);
+  return unitDelta >= LARGE_DELTA_MIN_UNITS || quantity >= Math.max(1, item.quantity) * LARGE_DELTA_MULTIPLIER;
 }
 
 function listenMessage(result: ListenResult): string {
@@ -231,7 +231,9 @@ function listenMessage(result: ListenResult): string {
     case "silent":
       return "No voice was detected. Try again a little closer to the mic.";
     case "transcription-failed":
-      return "Voice transcription is unavailable right now. Local count modes still work when a transcript is received.";
+      return "Voice transcription failed on the VPS AI service. The session is paused so you can retry after checking the AI audio model.";
+    case "microphone-timeout":
+      return "The browser did not return microphone access in time. Check the permission prompt or selected input device.";
     case "aborted":
       return "";
   }
@@ -256,7 +258,7 @@ async function parseWithAI(
   transcript: string,
   mode: "quantity" | "reason" | "custom",
   items: Item[],
-  opts?: { currentItemName?: string; currentParLevel?: number },
+  opts?: { currentItemName?: string; currentParLevel?: number; currentMinQuantity?: number; currentMaxQuantity?: number },
 ): Promise<GPTParseResult> {
   try {
     const res = await fetch(`${BASE}/api/voice/parse`, {
@@ -266,9 +268,17 @@ async function parseWithAI(
       body: JSON.stringify({
         transcript,
         mode,
-        items: items.slice(0, 80).map((it) => ({ id: it.id, name: it.name, parLevel: it.parLevel })),
+        items: items.slice(0, 80).map((it) => ({
+          id: it.id,
+          name: it.name,
+          parLevel: it.parLevel,
+          minQuantity: it.minQuantity,
+          maxQuantity: it.maxQuantity,
+        })),
         currentItemName: opts?.currentItemName,
         currentParLevel: opts?.currentParLevel,
+        currentMinQuantity: opts?.currentMinQuantity,
+        currentMaxQuantity: opts?.currentMaxQuantity,
       }),
     });
     if (!res.ok) throw new Error("parse failed");
@@ -343,7 +353,15 @@ export default function VoiceCheck() {
     listItemsParams,
     { query: { queryKey: getListItemsQueryKey(listItemsParams), retry: false } },
   );
-  const { speak, cancelSpeech, listenDetailed, stopListening, cancelAll } = useAIVoice();
+  const {
+    speak,
+    cancelSpeech,
+    listenDetailed,
+    precheckMicrophone,
+    stopListening,
+    cancelAll,
+    resetVoiceSession,
+  } = useAIVoice();
   const voiceSupport = getAIVoiceSupport();
 
   const [phase, setPhase] = useState<Phase>("setup");
@@ -358,6 +376,8 @@ export default function VoiceCheck() {
   const [voiceNotice, setVoiceNotice] = useState("");
   const [aiStatus, setAiStatus] = useState<AIStatus | null>(null);
   const [pendingCounted, setPendingCounted] = useState<number | null>(null);
+  const [micPrecheck, setMicPrecheck] = useState<MicrophonePrecheckResult | null>(null);
+  const [micChecking, setMicChecking] = useState(false);
 
   // Custom (AI voice) mode state
   const [customMatchedItem, setCustomMatchedItem] = useState<Item | null>(null);
@@ -465,6 +485,7 @@ export default function VoiceCheck() {
     vibrate([50, 30, 50]);
     const result = await listenDetailed(timeoutMs);
     if (controlRef.current.shouldStop || controlRef.current.shouldPause) return null;
+    if (controlRef.current.shouldSkip || controlRef.current.shouldRepeat) return "";
     if (!result.ok) {
       const message = listenMessage(result);
       if (message) {
@@ -476,6 +497,11 @@ export default function VoiceCheck() {
         });
       }
       setLastHeard("");
+      if (result.reason !== "silent") {
+        controlRef.current.shouldPause = true;
+        setPhase("paused");
+        return null;
+      }
       return "";
     }
     const transcript = result.transcript;
@@ -483,6 +509,24 @@ export default function VoiceCheck() {
     setLastHeard(transcript || "");
     return transcript;
   }, [listenDetailed]);
+
+  const runMicPrecheck = useCallback(async () => {
+    setMicChecking(true);
+    setVoiceNotice("");
+    try {
+      const result = await precheckMicrophone();
+      setMicPrecheck(result);
+      toast({
+        title: result.ok ? "Microphone ready" : "Microphone check failed",
+        description: result.message,
+        variant: result.ok ? "default" : "destructive",
+      });
+      if (!result.ok) setVoiceNotice(result.message);
+      return result.ok;
+    } finally {
+      setMicChecking(false);
+    }
+  }, [precheckMicrophone]);
 
   const notifySaveFailed = useCallback(async () => {
     const message = "Could not save that count. Check the connection, then try again.";
@@ -497,7 +541,7 @@ export default function VoiceCheck() {
 
   const confirmLargeChange = useCallback(async (item: Item, quantity: number) => {
     if (!isLargeQuantityChange(item, quantity)) return true;
-    const message = `Large change for ${item.name}: expected ${item.parLevel}, heard ${quantity}.`;
+    const message = `Large change for ${item.name}: system count ${item.quantity}, heard ${quantity}.`;
     setVoiceNotice(message);
     await safeSpeak(message);
     return window.confirm(`${message}\n\nSave this count?`);
@@ -523,7 +567,7 @@ export default function VoiceCheck() {
 
         setPhase("speaking");
         setLastHeard("");
-        const ok = await safeSpeak(`${item.name}. Expected: ${item.parLevel}.`);
+        const ok = await safeSpeak(`${item.name}. System count ${item.quantity}. Range ${item.minQuantity} to ${item.maxQuantity}.`);
         if (!ok) break itemLoop;
 
         setPhase("listening");
@@ -532,18 +576,20 @@ export default function VoiceCheck() {
         if (transcript === null) break itemLoop;
 
         if (controlRef.current.shouldSkip) {
-          addResult({ item, expected: item.parLevel, counted: null, diff: null, status: "skipped", adjustmentType: null });
+          addResult({ item, expected: item.quantity, counted: null, diff: null, status: "skipped", adjustmentType: null });
           break itemLoop;
         }
         if (controlRef.current.shouldRepeat) continue itemLoop;
 
         const aiQty = await parseWithAI(transcript, "quantity", items, {
           currentItemName: item.name,
-          currentParLevel: item.parLevel,
+          currentParLevel: item.quantity,
+          currentMinQuantity: item.minQuantity,
+          currentMaxQuantity: item.maxQuantity,
         });
 
         if (aiQty.action === "skip") {
-          addResult({ item, expected: item.parLevel, counted: null, diff: null, status: "skipped", adjustmentType: null });
+          addResult({ item, expected: item.quantity, counted: null, diff: null, status: "skipped", adjustmentType: null });
           break itemLoop;
         }
         if (aiQty.action === "done") {
@@ -552,44 +598,44 @@ export default function VoiceCheck() {
         }
         if (aiQty.action === "unknown") {
           await safeSpeak("Didn't catch that. Skipping.");
-          addResult({ item, expected: item.parLevel, counted: null, diff: null, status: "no-response", adjustmentType: null });
+          addResult({ item, expected: item.quantity, counted: null, diff: null, status: "no-response", adjustmentType: null });
           break itemLoop;
         }
 
-        const counted = aiQty.action === "verify" ? item.parLevel : (aiQty as { action: "count"; quantity: number }).quantity;
+        const counted = aiQty.action === "verify" ? item.quantity : (aiQty as { action: "count"; quantity: number }).quantity;
 
-        if (aiQty.action === "verify" || counted === item.parLevel) {
+        if (aiQty.action === "verify" || counted === item.quantity) {
           vibrate(100);
           try {
             await logVerification(item);
           } catch {
             await notifySaveFailed();
-            addResult({ item, expected: item.parLevel, counted: null, diff: null, status: "no-response", adjustmentType: null });
+            addResult({ item, expected: item.quantity, counted: null, diff: null, status: "no-response", adjustmentType: null });
             break itemLoop;
           }
           await safeSpeak("Got it.");
-          addResult({ item, expected: item.parLevel, counted: item.quantity, diff: 0, status: "verified", adjustmentType: null });
+          addResult({ item, expected: item.quantity, counted: item.quantity, diff: 0, status: "verified", adjustmentType: null });
           break itemLoop;
         }
 
-        if (counted > item.parLevel) {
+        if (counted > item.quantity) {
           if (!(await confirmLargeChange(item, counted))) {
-            addResult({ item, expected: item.parLevel, counted: null, diff: null, status: "skipped", adjustmentType: null });
+            addResult({ item, expected: item.quantity, counted: null, diff: null, status: "skipped", adjustmentType: null });
             break itemLoop;
           }
           try {
             await saveAdjustment(item.id, counted, "Adjustment", false);
           } catch {
             await notifySaveFailed();
-            addResult({ item, expected: item.parLevel, counted: null, diff: null, status: "no-response", adjustmentType: null });
+            addResult({ item, expected: item.quantity, counted: null, diff: null, status: "no-response", adjustmentType: null });
             break itemLoop;
           }
-          addResult({ item, expected: item.parLevel, counted, diff: counted - item.parLevel, status: "updated-higher", adjustmentType: "Adjustment" });
+          addResult({ item, expected: item.quantity, counted, diff: counted - item.quantity, status: "updated-higher", adjustmentType: "Adjustment" });
           await safeSpeak(`Got ${counted}. Saved.`);
           break itemLoop;
         }
 
-        if (counted < item.parLevel) {
+        if (counted < item.quantity) {
           setPendingCounted(counted);
           setPhase("reason-speaking");
           const reasonOk = await safeSpeak(
@@ -606,7 +652,7 @@ export default function VoiceCheck() {
           const reason = aiReason.action === "reason" ? aiReason.reason : parseReason(reasonTranscript || "");
           if (!(await confirmLargeChange(item, counted))) {
             setPendingCounted(null);
-            addResult({ item, expected: item.parLevel, counted: null, diff: null, status: "skipped", adjustmentType: null });
+            addResult({ item, expected: item.quantity, counted: null, diff: null, status: "skipped", adjustmentType: null });
             break itemLoop;
           }
           try {
@@ -614,10 +660,10 @@ export default function VoiceCheck() {
           } catch {
             setPendingCounted(null);
             await notifySaveFailed();
-            addResult({ item, expected: item.parLevel, counted: null, diff: null, status: "no-response", adjustmentType: null });
+            addResult({ item, expected: item.quantity, counted: null, diff: null, status: "no-response", adjustmentType: null });
             break itemLoop;
           }
-          addResult({ item, expected: item.parLevel, counted, diff: counted - item.parLevel, status: "updated-lower", adjustmentType: reason });
+          addResult({ item, expected: item.quantity, counted, diff: counted - item.quantity, status: "updated-lower", adjustmentType: reason });
           vibrate([50, 50, 100]);
           await safeSpeak(`Saved as ${reason}.`);
           setPendingCounted(null);
@@ -646,7 +692,9 @@ export default function VoiceCheck() {
     controlRef.current = { shouldStop: false, shouldSkip: false, shouldRepeat: false, shouldPause: false };
     await acquireWakeLock();
 
-    await safeSpeak("Ready. Say an item name and count.");
+    setStatusMessage("Ready. Say an item name and count.");
+    setPhase("custom-listening");
+    void speak("Ready. Say an item name and count.");
 
     while (!controlRef.current.shouldStop && !controlRef.current.shouldPause) {
       setPhase("custom-listening");
@@ -708,38 +756,38 @@ export default function VoiceCheck() {
       setCustomMatchedItem(item);
       setCustomSpokenQty(quantity);
 
-      if (quantity === item.parLevel) {
+      if (quantity === item.quantity) {
         vibrate(100);
         try {
           await logVerification(item);
         } catch {
           await notifySaveFailed();
-          addResult({ item, expected: item.parLevel, counted: null, diff: null, status: "no-response", adjustmentType: null });
+          addResult({ item, expected: item.quantity, counted: null, diff: null, status: "no-response", adjustmentType: null });
           continue;
         }
         await safeSpeak("OK");
-        addResult({ item, expected: item.parLevel, counted: quantity, diff: 0, status: "verified", adjustmentType: null });
+        addResult({ item, expected: item.quantity, counted: quantity, diff: 0, status: "verified", adjustmentType: null });
 
-      } else if (quantity > item.parLevel) {
+      } else if (quantity > item.quantity) {
         if (!(await confirmLargeChange(item, quantity))) {
-          addResult({ item, expected: item.parLevel, counted: null, diff: null, status: "skipped", adjustmentType: null });
+          addResult({ item, expected: item.quantity, counted: null, diff: null, status: "skipped", adjustmentType: null });
           continue;
         }
         try {
           await saveAdjustment(item.id, quantity, "Adjustment", false);
         } catch {
           await notifySaveFailed();
-          addResult({ item, expected: item.parLevel, counted: null, diff: null, status: "no-response", adjustmentType: null });
+          addResult({ item, expected: item.quantity, counted: null, diff: null, status: "no-response", adjustmentType: null });
           continue;
         }
-        addResult({ item, expected: item.parLevel, counted: quantity, diff: quantity - item.parLevel, status: "updated-higher", adjustmentType: "Adjustment" });
-        await safeSpeak(`${item.name}: ${quantity} — above par. Saved.`);
+        addResult({ item, expected: item.quantity, counted: quantity, diff: quantity - item.quantity, status: "updated-higher", adjustmentType: "Adjustment" });
+        await safeSpeak(`${item.name}: ${quantity}. Saved.`);
 
       } else {
         setPendingCounted(quantity);
         setPhase("reason-speaking");
         const reasonOk = await safeSpeak(
-          `${item.name}: got ${quantity}, expected ${item.parLevel}. Why the shortage? Say: theft, spoilage, comp, return to warehouse, damaged, or missing from bin.`
+          `${item.name}: got ${quantity}, system count is ${item.quantity}. Why the shortage? Say: theft, spoilage, comp, return to warehouse, damaged, or missing from bin.`
         );
         if (!reasonOk) break;
 
@@ -752,7 +800,7 @@ export default function VoiceCheck() {
         const reason = aiReason.action === "reason" ? aiReason.reason : parseReason(reasonTranscript || "");
         if (!(await confirmLargeChange(item, quantity))) {
           setPendingCounted(null);
-          addResult({ item, expected: item.parLevel, counted: null, diff: null, status: "skipped", adjustmentType: null });
+          addResult({ item, expected: item.quantity, counted: null, diff: null, status: "skipped", adjustmentType: null });
           continue;
         }
         try {
@@ -760,10 +808,10 @@ export default function VoiceCheck() {
         } catch {
           setPendingCounted(null);
           await notifySaveFailed();
-          addResult({ item, expected: item.parLevel, counted: null, diff: null, status: "no-response", adjustmentType: null });
+          addResult({ item, expected: item.quantity, counted: null, diff: null, status: "no-response", adjustmentType: null });
           continue;
         }
-        addResult({ item, expected: item.parLevel, counted: quantity, diff: quantity - item.parLevel, status: "updated-lower", adjustmentType: reason });
+        addResult({ item, expected: item.quantity, counted: quantity, diff: quantity - item.quantity, status: "updated-lower", adjustmentType: reason });
         vibrate([50, 50, 100]);
         await safeSpeak(`Saved as ${reason}.`);
         setPendingCounted(null);
@@ -786,47 +834,76 @@ export default function VoiceCheck() {
     if (!countMode) return [];
     switch (countMode) {
       case "all": return [...items];
-      case "low-stock": return items.filter((it) => it.quantity < it.parLevel);
+      case "low-stock": return items.filter((it) => it.quantity < it.minQuantity);
       case "category": return items.filter((it) => it.category === selectedCategory);
       case "custom": return [];
     }
   }, [countMode, items, selectedCategory]);
 
-  const handleStart = useCallback(() => {
+  const handleStart = useCallback(async () => {
+    if (!countMode || isRunningRef.current) return;
+
+    resetVoiceSession();
     sessionResultsRef.current = [];
     setSessionResults([]);
     setCurrentIndex(0);
+    currentIndexRef.current = 0;
     setLastHeard("");
     setVoiceNotice("");
-    setStatusMessage("");
+    setStatusMessage("Starting voice session...");
     setPendingCounted(null);
     setCustomMatchedItem(null);
     setCustomSpokenQty(null);
 
+    const queue = countMode === "custom" ? [] : buildQueue();
+    if (countMode !== "custom" && queue.length === 0) {
+      setVoiceNotice("No items are queued for this count mode.");
+      return;
+    }
+
+    setQueuedItems(queue);
+    setPhase("speaking");
+
+    if (!micPrecheck?.ok) {
+      const ready = await runMicPrecheck();
+      if (!ready) {
+        setPhase("select-mode");
+        setStatusMessage("");
+        return;
+      }
+    }
+
     if (countMode === "custom") {
-      setQueuedItems([]);
       runCustomSession(items);
     } else {
-      const queue = buildQueue();
-      if (queue.length === 0) return;
-      setQueuedItems(queue);
       runSession(queue, 0);
     }
-  }, [countMode, buildQueue, runSession, runCustomSession, items]);
+  }, [
+    countMode,
+    buildQueue,
+    runSession,
+    runCustomSession,
+    items,
+    micPrecheck,
+    runMicPrecheck,
+    resetVoiceSession,
+  ]);
 
   const handlePause = useCallback(() => {
     controlRef.current.shouldPause = true;
+    setPhase("paused");
     cancelAll();
     releaseWakeLock();
   }, [cancelAll, releaseWakeLock]);
 
   const handleResume = useCallback(() => {
+    resetVoiceSession();
     if (countMode === "custom") {
       runCustomSession(items);
     } else {
       runSession(queuedItems, currentIndexRef.current);
     }
-  }, [countMode, runCustomSession, runSession, items, queuedItems]);
+  }, [countMode, runCustomSession, runSession, items, queuedItems, resetVoiceSession]);
 
   const handleSkip = useCallback(() => {
     controlRef.current.shouldSkip = true;
@@ -842,6 +919,7 @@ export default function VoiceCheck() {
 
   const handleFinish = useCallback(() => {
     controlRef.current.shouldStop = true;
+    setPhase("complete");
     cancelAll();
     releaseWakeLock();
   }, [cancelAll, releaseWakeLock]);
@@ -972,9 +1050,9 @@ export default function VoiceCheck() {
                         <div>
                           <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-1">You said</p>
                           <p className={`text-5xl font-black tabular-nums ${
-                            customSpokenQty === displayItem.parLevel
+                            customSpokenQty === displayItem.quantity
                               ? "text-emerald-500"
-                              : customSpokenQty < displayItem.parLevel
+                              : customSpokenQty < displayItem.quantity
                               ? "text-amber-500"
                               : "text-blue-500"
                           }`}>
@@ -982,8 +1060,8 @@ export default function VoiceCheck() {
                           </p>
                         </div>
                         <div>
-                          <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-1">Par</p>
-                          <p className="text-5xl font-black text-primary tabular-nums">{displayItem.parLevel}</p>
+                          <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-1">System</p>
+                          <p className="text-5xl font-black text-primary tabular-nums">{displayItem.quantity}</p>
                         </div>
                       </div>
                     )}
@@ -1080,9 +1158,9 @@ export default function VoiceCheck() {
 
               <div className="flex items-end gap-8 py-2">
                 <div>
-                  <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-1">Par (expected)</p>
+                  <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-1">System Count</p>
                   <p className="text-7xl font-black text-primary tabular-nums leading-none">
-                    {currentItem.parLevel}
+                    {currentItem.quantity}
                   </p>
                 </div>
                 {pendingCounted !== null ? (
@@ -1297,10 +1375,41 @@ export default function VoiceCheck() {
           <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800 dark:bg-amber-950/30 dark:border-amber-800 dark:text-amber-300">
             <MicOff className="w-4 h-4 mt-0.5 shrink-0" />
             <span>
-              <strong>Voice input not supported.</strong> Use Chrome on Android or Safari on iOS for full voice support.
+              <strong>Voice input not ready.</strong>{" "}
+              {!voiceSupport.isSecureContext
+                ? "Open the app through HTTPS for microphone access."
+                : "Use Chrome on Android or Safari on iOS for full voice support."}
             </span>
           </div>
         )}
+
+        <div className={`flex flex-col gap-3 rounded-xl border px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between ${
+          micPrecheck?.ok
+            ? "border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200"
+            : micPrecheck
+              ? "border-red-200 bg-red-50 text-red-900 dark:border-red-800 dark:bg-red-950/30 dark:text-red-200"
+              : "border-blue-200 bg-blue-50 text-blue-900 dark:border-blue-800 dark:bg-blue-950/30 dark:text-blue-200"
+        }`}>
+          <div className="flex items-start gap-3">
+            {micPrecheck?.ok ? <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0" /> : <Mic className="w-4 h-4 mt-0.5 shrink-0" />}
+            <div>
+              <p className="font-semibold">Microphone precheck</p>
+              <p className="mt-0.5">
+                {micPrecheck?.message ?? "Run this before AI translation testing to confirm browser permission and recording support."}
+              </p>
+            </div>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={runMicPrecheck}
+            disabled={micChecking}
+            className="shrink-0 bg-background/80"
+          >
+            {micChecking ? "Checking..." : micPrecheck?.ok ? "Check Again" : "Check Mic"}
+          </Button>
+        </div>
 
         {aiStatus?.configured === false && (
           <div className="flex items-start gap-3 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 text-sm text-blue-900 dark:bg-blue-950/30 dark:border-blue-800 dark:text-blue-200">
@@ -1425,7 +1534,7 @@ export default function VoiceCheck() {
                 <div>
                   <p className="font-bold text-sm">Low Stock</p>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    {items.filter((it) => it.quantity < it.parLevel).length} below par
+                    {items.filter((it) => it.quantity < it.minQuantity).length} below minimum
                   </p>
                 </div>
               </button>

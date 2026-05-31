@@ -14,7 +14,11 @@ export interface CreateItemBody {
   /** @minimum 0 */
   quantity: number;
   /** @minimum 0 */
-  parLevel: number;
+  parLevel?: number;
+  /** @minimum 0 */
+  minQuantity?: number;
+  /** @minimum 0 */
+  maxQuantity?: number;
   /** @minLength 1 */
   location: string;
   barcode?: string | null;

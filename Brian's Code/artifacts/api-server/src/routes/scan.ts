@@ -281,6 +281,8 @@ router.post("/scan/action", async (req, res) => {
       category: data.category ?? source.category,
       quantity: data.quantity,
       parLevel: data.parLevel,
+      minQuantity: data.parLevel,
+      maxQuantity: Math.max(data.parLevel, data.quantity, data.parLevel * 2),
       location: resolvedLocation.name,
       barcode: data.barcode,
     }).returning();
@@ -330,6 +332,8 @@ router.post("/scan/action", async (req, res) => {
       category: data.category,
       quantity: data.quantity,
       parLevel: data.parLevel,
+      minQuantity: data.parLevel,
+      maxQuantity: Math.max(data.parLevel, data.quantity, data.parLevel * 2),
       location: resolvedLocation.name,
       barcode: data.barcode,
     }).returning();

@@ -187,6 +187,12 @@ router.post("/command", async (req, res) => {
         category: cmd.category ?? "Uncategorized",
         quantity: Math.max(0, Math.floor(cmd.quantity)),
         parLevel: Math.max(0, Math.floor(cmd.parLevel ?? 0)),
+        minQuantity: Math.max(0, Math.floor(cmd.parLevel ?? 0)),
+        maxQuantity: Math.max(
+          Math.max(0, Math.floor(cmd.parLevel ?? 0)),
+          Math.max(0, Math.floor(cmd.quantity)),
+          Math.max(0, Math.floor(cmd.parLevel ?? 0)) * 2,
+        ),
         location: resolvedLocation.name,
       })
       .returning();

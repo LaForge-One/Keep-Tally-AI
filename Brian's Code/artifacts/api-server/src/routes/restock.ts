@@ -21,7 +21,7 @@ function csvEscape(value: string | number): string {
 }
 
 async function getRestockRows(req: Request, res: Response, location: string | undefined) {
-  const baseWhere = lt(itemsTable.quantity, itemsTable.parLevel);
+  const baseWhere = lt(itemsTable.quantity, itemsTable.minQuantity);
   if (location) {
     const resolvedLocation = await resolveLocationByName(req, res, location);
     if (!resolvedLocation) return null;
@@ -114,7 +114,7 @@ router.get("/restock", requirePermission("edit_store_inventory"), async (req, re
 
   const entries = rows.map((row) => ({
     item: serializeItem(row),
-    unitsNeeded: Math.max(0, row.parLevel - row.quantity),
+    unitsNeeded: Math.max(0, row.maxQuantity - row.quantity),
   }));
   const totalUnitsNeeded = entries.reduce((acc, e) => acc + e.unitsNeeded, 0);
 
@@ -136,7 +136,8 @@ router.get("/restock.csv", requirePermission("edit_store_inventory"), async (req
     "Category",
     "Location",
     "Current Qty",
-    "Par Level",
+    "Min Qty",
+    "Max Qty",
     "Units Needed",
     "Last Updated",
   ];
@@ -148,8 +149,9 @@ router.get("/restock.csv", requirePermission("edit_store_inventory"), async (req
         csvEscape(row.category),
         csvEscape(row.location),
         row.quantity,
-        row.parLevel,
-        Math.max(0, row.parLevel - row.quantity),
+        row.minQuantity,
+        row.maxQuantity,
+        Math.max(0, row.maxQuantity - row.quantity),
         row.lastUpdated.toISOString(),
       ].join(","),
     );

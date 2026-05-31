@@ -1,0 +1,262 @@
+import { useMemo } from "react";
+import type { ElementType } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { Layout } from "@/components/layout";
+import { PageHeader } from "@/components/page-header";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  AlertTriangle,
+  ArrowRightLeft,
+  Bot,
+  Boxes,
+  CheckCircle2,
+  RefreshCw,
+  ShieldCheck,
+  TrendingDown,
+} from "lucide-react";
+
+const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+
+type RecommendationSeverity = "critical" | "warning" | "info";
+type RecommendationType = "store_restock" | "store_overstock" | "warehouse_reorder";
+
+type AgentRecommendation = {
+  type: RecommendationType;
+  severity: RecommendationSeverity;
+  itemId: number;
+  itemName: string;
+  location?: string;
+  quantity: number;
+  minQuantity?: number;
+  maxQuantity?: number;
+  minPar?: number;
+  maxPar?: number;
+  recommendedTransferQty?: number;
+  recommendedPurchaseQty?: number;
+  message: string;
+};
+
+type HousekeepingResponse = {
+  generatedAt: string;
+  mode: "read_only";
+  summary: {
+    belowMinimumCount: number;
+    overstockCount: number;
+    warehouseReorderCount: number;
+    recentChangeCount: number;
+  };
+  recommendations: AgentRecommendation[];
+};
+
+const GROUPS: Record<RecommendationType, { title: string; label: string; icon: ElementType }> = {
+  store_restock: {
+    title: "Store Restock",
+    label: "Below minimum",
+    icon: TrendingDown,
+  },
+  store_overstock: {
+    title: "Store Overstock",
+    label: "Above maximum",
+    icon: Boxes,
+  },
+  warehouse_reorder: {
+    title: "Warehouse Reorder",
+    label: "Warehouse range",
+    icon: ArrowRightLeft,
+  },
+};
+
+function severityClass(severity: RecommendationSeverity) {
+  if (severity === "critical") return "bg-red-100 text-red-700 border-red-200";
+  if (severity === "warning") return "bg-amber-100 text-amber-700 border-amber-200";
+  return "bg-sky-100 text-sky-700 border-sky-200";
+}
+
+function typeLabel(type: RecommendationType) {
+  return GROUPS[type]?.label ?? type;
+}
+
+function recommendationQty(rec: AgentRecommendation) {
+  if (rec.type === "store_restock") return rec.recommendedTransferQty ?? 0;
+  if (rec.type === "warehouse_reorder") return rec.recommendedPurchaseQty ?? 0;
+  return Math.max(0, rec.quantity - (rec.maxQuantity ?? rec.quantity));
+}
+
+function RecommendationRow({ rec }: { rec: AgentRecommendation }) {
+  const qty = recommendationQty(rec);
+  const range =
+    rec.type === "warehouse_reorder"
+      ? `${rec.minPar ?? 0}-${rec.maxPar ?? 0}`
+      : `${rec.minQuantity ?? 0}-${rec.maxQuantity ?? 0}`;
+
+  return (
+    <div className="grid grid-cols-1 gap-3 border-t border-border px-4 py-3 first:border-t-0 sm:grid-cols-[1fr_auto_auto] sm:items-center">
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="truncate text-sm font-semibold text-foreground">{rec.itemName}</p>
+          <Badge variant="outline" className={`text-[11px] font-semibold ${severityClass(rec.severity)}`}>
+            {rec.severity}
+          </Badge>
+          <Badge variant="secondary" className="text-[11px] font-medium">
+            {typeLabel(rec.type)}
+          </Badge>
+        </div>
+        <p className="mt-1 text-xs text-muted-foreground">{rec.message}</p>
+      </div>
+      <div className="grid grid-cols-3 gap-3 text-right text-xs sm:min-w-[220px]">
+        <div>
+          <p className="font-bold tabular-nums text-foreground">{rec.quantity}</p>
+          <p className="text-muted-foreground">Current</p>
+        </div>
+        <div>
+          <p className="font-bold tabular-nums text-foreground">{range}</p>
+          <p className="text-muted-foreground">Range</p>
+        </div>
+        <div>
+          <p className="font-bold tabular-nums text-primary">{qty}</p>
+          <p className="text-muted-foreground">{rec.type === "warehouse_reorder" ? "Buy" : "Move"}</p>
+        </div>
+      </div>
+      <Button variant="outline" size="sm" disabled title="Draft actions will be added after review">
+        Review
+      </Button>
+    </div>
+  );
+}
+
+export default function AgentInsightsPage() {
+  const { data, isLoading, isFetching, refetch, error } = useQuery<HousekeepingResponse>({
+    queryKey: ["agent-housekeeping"],
+    queryFn: async () => {
+      const res = await fetch(`${BASE}/api/agents/housekeeping`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to load agent recommendations");
+      return res.json();
+    },
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+  });
+
+  const grouped = useMemo(() => {
+    const map = new Map<RecommendationType, AgentRecommendation[]>();
+    for (const rec of data?.recommendations ?? []) {
+      if (!map.has(rec.type)) map.set(rec.type, []);
+      map.get(rec.type)!.push(rec);
+    }
+    return Array.from(map.entries()).map(([type, recs]) => ({ type, recs }));
+  }, [data]);
+
+  const totalRecommendations = data?.recommendations.length ?? 0;
+  const agentConnected = Boolean(data && !error);
+
+  return (
+    <Layout>
+      <div className="space-y-5">
+        <PageHeader
+          title="Agent Insights"
+          description="Read-only operational recommendations from the KeepTally middleware layer"
+          actions={
+            <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching}>
+              <RefreshCw className={`mr-1.5 h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
+              Refresh
+            </Button>
+          }
+        />
+
+        <div className="grid gap-3 md:grid-cols-4">
+          <div className="rounded-lg border border-border bg-card p-4 shadow-sm">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Agent Mode</p>
+              <ShieldCheck className="h-4 w-4 text-emerald-500" />
+            </div>
+            <p className="mt-2 text-2xl font-black capitalize text-foreground">{data?.mode.replace("_", " ") ?? "Read only"}</p>
+            <p className="mt-1 text-xs text-muted-foreground">Recommendations require human review.</p>
+          </div>
+          <div className="rounded-lg border border-border bg-card p-4 shadow-sm">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Below Minimum</p>
+            <p className="mt-2 text-3xl font-black text-amber-500">{data?.summary.belowMinimumCount ?? 0}</p>
+          </div>
+          <div className="rounded-lg border border-border bg-card p-4 shadow-sm">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Overstock</p>
+            <p className="mt-2 text-3xl font-black text-sky-500">{data?.summary.overstockCount ?? 0}</p>
+          </div>
+          <div className="rounded-lg border border-border bg-card p-4 shadow-sm">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Warehouse Reorders</p>
+            <p className="mt-2 text-3xl font-black text-red-500">{data?.summary.warehouseReorderCount ?? 0}</p>
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-border bg-card p-4 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+                <Bot className="h-5 w-5 text-primary" />
+              </div>
+              <div>
+                <p className="text-sm font-bold text-foreground">Housekeeping Agent</p>
+                <p className="text-xs text-muted-foreground">
+                  {data?.generatedAt ? `Last run ${new Date(data.generatedAt).toLocaleString()}` : "Waiting for first run"}
+                </p>
+              </div>
+            </div>
+            <Badge
+              variant="outline"
+              className={
+                agentConnected
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                  : "border-amber-200 bg-amber-50 text-amber-700"
+              }
+            >
+              {agentConnected ? <CheckCircle2 className="mr-1 h-3 w-3" /> : <AlertTriangle className="mr-1 h-3 w-3" />}
+              {agentConnected ? "Connected" : "Waiting"}
+            </Badge>
+          </div>
+        </div>
+
+        {error ? (
+          <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+            <div className="flex items-center gap-2 font-semibold">
+              <AlertTriangle className="h-4 w-4" />
+              Could not load agent recommendations.
+            </div>
+          </div>
+        ) : isLoading ? (
+          <div className="space-y-3">
+            {[0, 1, 2].map((i) => (
+              <Skeleton key={i} className="h-28 w-full rounded-lg" />
+            ))}
+          </div>
+        ) : totalRecommendations === 0 ? (
+          <div className="rounded-lg border border-border bg-card p-10 text-center shadow-sm">
+            <CheckCircle2 className="mx-auto mb-3 h-10 w-10 text-emerald-500" />
+            <h2 className="text-lg font-bold text-foreground">No agent recommendations right now</h2>
+            <p className="mt-1 text-sm text-muted-foreground">Inventory ranges look healthy based on the current middleware checks.</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {grouped.map(({ type, recs }) => {
+              const Icon = GROUPS[type].icon;
+              return (
+                <section key={type} className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+                  <div className="flex items-center justify-between border-b border-border bg-muted/30 px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <Icon className="h-4 w-4 text-muted-foreground" />
+                      <h2 className="text-sm font-bold text-foreground">{GROUPS[type].title}</h2>
+                    </div>
+                    <Badge variant="secondary" className="text-xs font-semibold">{recs.length}</Badge>
+                  </div>
+                  <div>
+                    {recs.map((rec) => (
+                      <RecommendationRow key={`${rec.type}-${rec.itemId}-${rec.location ?? "warehouse"}`} rec={rec} />
+                    ))}
+                  </div>
+                </section>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </Layout>
+  );
+}

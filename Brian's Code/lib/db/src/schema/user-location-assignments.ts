@@ -18,6 +18,7 @@ export const userLocationAssignmentsTable = pgTable(
       table.userId,
       table.locationId,
     ),
+    accountUserIdx: index("user_location_assignments_account_user_idx").on(table.accountId, table.userId),
     accountLocationIdx: index("user_location_assignments_account_location_idx").on(table.accountId, table.locationId),
   }),
 );

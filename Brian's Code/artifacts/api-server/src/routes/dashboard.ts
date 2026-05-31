@@ -179,7 +179,7 @@ router.get("/dashboard/summary", async (req, res) => {
   const recent = await getDashboardHistory(req, res, undefined, 15, location);
   if (!recent) return;
 
-  const belowParRows = items.filter((i) => i.quantity < i.parLevel);
+  const belowParRows = items.filter((i) => i.quantity < i.minQuantity);
 
   const totalItems = items.length;
   const totalUnits = items.reduce((sum, i) => sum + i.quantity, 0);
@@ -263,20 +263,20 @@ router.get("/dashboard/voice", async (req, res) => {
     return whByName.get(item.name.toLowerCase()) ?? 0;
   }
 
-  // Below par items
+  // Below minimum items
   const belowParItems = items
-    .filter((i) => i.quantity < i.parLevel)
+    .filter((i) => i.quantity < i.minQuantity)
     .sort((a, b) => {
-      // out of stock first, then by missing qty descending
-      const aMissing = a.parLevel - a.quantity;
-      const bMissing = b.parLevel - b.quantity;
+      // out of stock first, then by refill quantity descending
+      const aMissing = a.maxQuantity - a.quantity;
+      const bMissing = b.maxQuantity - b.quantity;
       if (a.quantity === 0 && b.quantity !== 0) return -1;
       if (b.quantity === 0 && a.quantity !== 0) return 1;
       return bMissing - aMissing;
     })
     .slice(0, 8)
     .map((i) => {
-      const missing = i.parLevel - i.quantity;
+      const missing = i.maxQuantity - i.quantity;
       const cost = getCost(i);
       return {
         id: i.id,
@@ -285,16 +285,18 @@ router.get("/dashboard/voice", async (req, res) => {
         location: i.location,
         quantity: i.quantity,
         parLevel: i.parLevel,
+        minQuantity: i.minQuantity,
+        maxQuantity: i.maxQuantity,
         missing,
         missingValue: missing * cost,
-        status: i.quantity === 0 ? "out" : missing >= i.parLevel * 0.7 ? "critical" : "low",
+        status: i.quantity === 0 ? "out" : i.quantity < Math.ceil(i.minQuantity * 0.5) ? "critical" : "low",
       };
     });
 
-  // Total missing value across ALL below-par items
-  const allBelowPar = items.filter((i) => i.quantity < i.parLevel);
+  // Total refill value across all below-minimum items
+  const allBelowPar = items.filter((i) => i.quantity < i.minQuantity);
   const missingValue = allBelowPar.reduce((sum, i) => {
-    return sum + (i.parLevel - i.quantity) * getCost(i);
+    return sum + (i.maxQuantity - i.quantity) * getCost(i);
   }, 0);
 
   const belowParCount  = allBelowPar.length;

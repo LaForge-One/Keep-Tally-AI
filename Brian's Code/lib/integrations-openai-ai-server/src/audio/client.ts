@@ -73,6 +73,7 @@ export async function convertToWav(audioBuffer: Buffer): Promise<Buffer> {
     await writeFile(inputPath, audioBuffer);
 
     await new Promise<void>((resolve, reject) => {
+      let stderr = "";
       const ffmpeg = spawn("ffmpeg", [
         "-i", inputPath,
         "-vn",
@@ -84,10 +85,12 @@ export async function convertToWav(audioBuffer: Buffer): Promise<Buffer> {
         outputPath,
       ]);
 
-      ffmpeg.stderr.on("data", () => {});
+      ffmpeg.stderr.on("data", (chunk) => {
+        stderr += String(chunk);
+      });
       ffmpeg.on("close", (code) => {
         if (code === 0) resolve();
-        else reject(new Error(`ffmpeg exited with code ${code}`));
+        else reject(new Error(`ffmpeg exited with code ${code}: ${stderr.slice(-1000)}`));
       });
       ffmpeg.on("error", reject);
     });

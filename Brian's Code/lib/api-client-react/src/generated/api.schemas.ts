@@ -19,6 +19,8 @@ export interface Item {
   category: string;
   quantity: number;
   parLevel: number;
+  minQuantity: number;
+  maxQuantity: number;
   location: string;
   barcode?: string | null;
   lastUpdated: string;
@@ -33,7 +35,11 @@ export interface CreateItemBody {
   /** @minimum 0 */
   quantity: number;
   /** @minimum 0 */
-  parLevel: number;
+  parLevel?: number;
+  /** @minimum 0 */
+  minQuantity?: number;
+  /** @minimum 0 */
+  maxQuantity?: number;
   /** @minLength 1 */
   location: string;
   barcode?: string | null;
@@ -48,6 +54,10 @@ export interface UpdateItemBody {
   quantity?: number;
   /** @minimum 0 */
   parLevel?: number;
+  /** @minimum 0 */
+  minQuantity?: number;
+  /** @minimum 0 */
+  maxQuantity?: number;
   /** @minLength 1 */
   location?: string;
   barcode?: string | null;

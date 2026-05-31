@@ -50,6 +50,20 @@
       "when": 1778006400000,
       "tag": "0006_lookup_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1780171200000,
+      "tag": "0007_phase_one_relational_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1780174800000,
+      "tag": "0008_store_min_max_stock",
+      "breakpoints": true
     }
   ]
 }

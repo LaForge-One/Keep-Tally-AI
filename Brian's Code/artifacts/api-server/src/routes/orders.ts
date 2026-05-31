@@ -295,7 +295,7 @@ router.post("/orders", async (req, res) => {
       and(
         eq(itemsTable.accountId, req.account!.id),
         eq(itemsTable.locationId, resolvedLocation.id),
-        lt(itemsTable.quantity, itemsTable.parLevel)
+        lt(itemsTable.quantity, itemsTable.minQuantity)
       )
     )
     .orderBy(itemsTable.category, itemsTable.name);
@@ -313,7 +313,7 @@ router.post("/orders", async (req, res) => {
         itemId: item.id,
         itemName: item.name,
         category: item.category,
-        orderedQty: Math.max(0, item.parLevel - item.quantity),
+        orderedQty: Math.max(0, item.maxQuantity - item.quantity),
       }))
     );
   }

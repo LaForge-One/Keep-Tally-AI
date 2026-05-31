@@ -21,6 +21,16 @@ export const warehouseTransfersTable = pgTable(
   (table) => ({
     accountWarehouseIdx: index("warehouse_transfers_account_warehouse_idx").on(table.accountId, table.warehouseId),
     accountStoreLocationIdx: index("warehouse_transfers_account_store_location_idx").on(table.accountId, table.storeLocationId),
+    accountWarehouseItemCreatedAtIdx: index("warehouse_transfers_account_warehouse_item_created_idx").on(
+      table.accountId,
+      table.warehouseItemId,
+      table.createdAt,
+    ),
+    accountStoreItemCreatedAtIdx: index("warehouse_transfers_account_store_item_created_idx").on(
+      table.accountId,
+      table.storeItemId,
+      table.createdAt,
+    ),
   }),
 );
 

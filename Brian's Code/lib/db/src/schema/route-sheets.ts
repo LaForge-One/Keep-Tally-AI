@@ -54,6 +54,11 @@ export const routeSheetStopsTable = pgTable(
   (table) => ({
     accountSheetIdx: index("route_sheet_stops_account_sheet_idx").on(table.accountId, table.routeSheetId),
     accountLocationIdx: index("route_sheet_stops_account_location_idx").on(table.accountId, table.locationId),
+    accountLocationCreatedAtIdx: index("route_sheet_stops_account_location_created_idx").on(
+      table.accountId,
+      table.locationId,
+      table.createdAt,
+    ),
     routeOrderIdx: index("route_sheet_stops_order_idx").on(table.routeSheetId, table.routeOrder),
   }),
 );
@@ -74,6 +79,7 @@ export const routeSheetStopItemsTable = pgTable(
   },
   (table) => ({
     accountStopIdx: index("route_sheet_stop_items_account_stop_idx").on(table.accountId, table.routeSheetStopId),
+    accountItemIdx: index("route_sheet_stop_items_account_item_idx").on(table.accountId, table.itemId),
   }),
 );
 

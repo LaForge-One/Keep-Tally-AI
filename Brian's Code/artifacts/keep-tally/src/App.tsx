@@ -24,6 +24,7 @@ import LoginPage from "@/pages/login";
 import ChangePasswordPage from "@/pages/change-password";
 import UserManagementPage from "@/pages/user-management";
 import SettingsPage from "@/pages/settings";
+import AgentInsightsPage from "@/pages/agent-insights";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -82,6 +83,7 @@ function Router() {
       <Route path="/inventory" component={() => <ProtectedRoute component={Inventory} />} />
       <Route path="/restock" component={() => <ProtectedRoute component={RestockPage} />} />
       <Route path="/history" component={() => <ProtectedRoute component={HistoryPage} />} />
+      <Route path="/agents" component={() => <ProtectedRoute component={AgentInsightsPage} />} />
       <Route path="/voice-check" component={() => <ProtectedRoute component={VoiceCheck} />} />
       <Route path="/orders" component={() => <ProtectedRoute component={OrdersPage} />} />
       <Route path="/route-sheets" component={() => <ProtectedRoute component={RouteSheetsPage} />} />
