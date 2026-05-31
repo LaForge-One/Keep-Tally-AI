@@ -39,6 +39,7 @@ import type { Item } from "@workspace/api-client-react";
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const LARGE_DELTA_MULTIPLIER = 2;
 const LARGE_DELTA_MIN_UNITS = 20;
+const VOICE_COUNT_TTS_ENABLED = import.meta.env.VITE_VOICE_COUNT_TTS_ENABLED === "true";
 
 type LocationOption = { id: number; name: string; slug: string };
 
@@ -488,7 +489,9 @@ export default function VoiceCheck() {
     if (controlRef.current.shouldStop || controlRef.current.shouldPause) return false;
     setStatusMessage(text);
     vibrate(30);
-    await speak(text);
+    if (VOICE_COUNT_TTS_ENABLED) {
+      await speak(text);
+    }
     return !controlRef.current.shouldStop && !controlRef.current.shouldPause;
   }, [speak]);
 
