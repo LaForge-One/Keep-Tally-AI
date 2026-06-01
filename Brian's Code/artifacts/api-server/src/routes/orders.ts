@@ -258,15 +258,23 @@ router.get("/orders", async (req, res) => {
     return r.deletedAt === null;
   });
 
-  const ordersWithCounts = await Promise.all(
-    filtered.map(async (order) => {
-      const items = await db
-        .select()
+  const orderIds = filtered.map((order) => order.id);
+  const itemCountRows = orderIds.length > 0
+    ? await db
+        .select({
+          orderId: orderItemsTable.orderId,
+          itemCount: sql<number>`count(*)::int`,
+        })
         .from(orderItemsTable)
-        .where(and(eq(orderItemsTable.accountId, req.account!.id), eq(orderItemsTable.orderId, order.id)));
-      return { ...serializeOrder(order), itemCount: items.length };
-    })
-  );
+        .where(and(eq(orderItemsTable.accountId, req.account!.id), inArray(orderItemsTable.orderId, orderIds)))
+        .groupBy(orderItemsTable.orderId)
+    : [];
+  const itemCountByOrderId = new Map(itemCountRows.map((row) => [row.orderId, row.itemCount]));
+
+  const ordersWithCounts = filtered.map((order) => ({
+    ...serializeOrder(order),
+    itemCount: itemCountByOrderId.get(order.id) ?? 0,
+  }));
 
   res.json(ordersWithCounts);
 });

@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq, and, asc, desc } from "drizzle-orm";
+import { eq, and, asc, desc, inArray } from "drizzle-orm";
 import { z } from "zod";
 import multer from "multer";
 import {
@@ -861,30 +861,44 @@ router.post("/warehouse/import/apply", requirePermission("edit_warehouse"), asyn
   const { items, mode } = parsed.data;
   let inserted = 0;
   let updated = 0;
+  const existingByBarcode = new Map<string, typeof warehouseItemsTable.$inferSelect>();
+
+  if (mode === "upsert") {
+    const barcodes = Array.from(new Set(items.map((item) => item.barcode).filter((barcode): barcode is string => Boolean(barcode))));
+    if (barcodes.length > 0) {
+      const existingRows = await db
+        .select()
+        .from(warehouseItemsTable)
+        .where(and(eq(warehouseItemsTable.accountId, req.account!.id), inArray(warehouseItemsTable.barcode, barcodes)));
+      for (const row of existingRows) {
+        if (row.barcode) existingByBarcode.set(row.barcode, row);
+      }
+    }
+  }
 
   for (const item of items) {
     const costPerUnit = item.costPerUnit ?? (item.caseCost && item.unitsPerCase ? item.caseCost / item.unitsPerCase : undefined) ?? undefined;
 
     if (mode === "upsert" && item.barcode) {
-      const existing = await db
-        .select()
-        .from(warehouseItemsTable)
-        .where(and(eq(warehouseItemsTable.accountId, req.account!.id), eq(warehouseItemsTable.barcode, item.barcode)));
-      if (existing.length > 0) {
-        await db.update(warehouseItemsTable)
+      const existing = existingByBarcode.get(item.barcode);
+      if (existing) {
+        const [row] = await db.update(warehouseItemsTable)
           .set({ ...item, costPerUnit, barcode: item.barcode ?? undefined, lastUpdated: new Date() })
-          .where(and(eq(warehouseItemsTable.id, existing[0]!.id), eq(warehouseItemsTable.accountId, req.account!.id)));
+          .where(and(eq(warehouseItemsTable.id, existing.id), eq(warehouseItemsTable.accountId, req.account!.id)))
+          .returning();
+        if (row?.barcode) existingByBarcode.set(row.barcode, row);
         updated++;
         continue;
       }
     }
 
-    await db.insert(warehouseItemsTable).values({
+    const [row] = await db.insert(warehouseItemsTable).values({
       ...item,
       accountId: req.account!.id,
       costPerUnit,
       barcode: item.barcode ?? undefined,
-    });
+    }).returning();
+    if (row?.barcode) existingByBarcode.set(row.barcode, row);
     inserted++;
   }
 
