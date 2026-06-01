@@ -70,16 +70,24 @@ router.post(
 
     try {
       const audioBuffer = req.file.buffer;
+      logger.info({
+        requestId: req.id,
+        bytes: audioBuffer.length,
+        mimetype: req.file.mimetype,
+        model: process.env.AI_TRANSCRIBE_MODEL ?? "gpt-4o-mini-transcribe",
+      }, "Voice transcription requested");
       const { buffer, format } = await withTimeout(
         ensureCompatibleFormat(audioBuffer),
         VOICE_FORMAT_TIMEOUT_MS,
         "Audio format conversion timed out",
       );
+      logger.info({ requestId: req.id, bytes: buffer.length, format }, "Voice audio converted");
       const transcript = await withTimeout(
         speechToText(buffer, format),
         VOICE_TRANSCRIBE_TIMEOUT_MS,
         "Voice transcription timed out",
       );
+      logger.info({ requestId: req.id, transcriptLength: transcript.length }, "Voice transcription completed");
       res.json({ transcript: transcript.trim() });
     } catch (err) {
       logger.error({ err, requestId: req.id }, "Voice transcription failed");
@@ -111,11 +119,18 @@ router.post("/voice/speak", async (req: Request, res: Response) => {
   const voice = parsed.data.voice ?? DEFAULT_TTS_VOICE;
 
   try {
+    logger.info({
+      requestId: req.id,
+      textLength: text.length,
+      voice,
+      model: process.env.AI_TTS_MODEL ?? "gpt-4o-mini-tts",
+    }, "Voice text-to-speech requested");
     const audioBuffer = await withTimeout(
       textToSpeech(text, voice, "wav"),
       VOICE_TTS_TIMEOUT_MS,
       "Text-to-speech timed out",
     );
+    logger.info({ requestId: req.id, bytes: audioBuffer.length }, "Voice text-to-speech completed");
     res.setHeader("Content-Type", "audio/wav");
     res.setHeader("Content-Length", audioBuffer.length);
     res.send(audioBuffer);
@@ -362,20 +377,30 @@ router.post("/voice/parse", async (req: Request, res: Response) => {
   }
 
   try {
+    logger.info({
+      requestId: req.id,
+      mode,
+      itemCount: items.length,
+      transcriptLength: transcript.length,
+    }, "Voice parse requested");
     if (mode === "quantity") {
       const fastResult = parseQuantityFast(transcript, currentParLevel);
       if (fastResult) {
+        logger.info({ requestId: req.id, mode, result: fastResult.action }, "Voice parse fast result");
         res.json(fastResult);
         return;
       }
     }
 
     if (mode === "reason") {
-      res.json(parseReasonFast(transcript));
+      const reasonResult = parseReasonFast(transcript);
+      logger.info({ requestId: req.id, mode, result: reasonResult }, "Voice parse fast result");
+      res.json(reasonResult);
       return;
     }
 
     const allowedItems = mode === "custom" ? await filterAllowedVoiceItems(req, items) : items;
+    logger.info({ requestId: req.id, mode, allowedItemCount: allowedItems.length }, "Voice parse allowed items loaded");
     const prompt = buildPrompt(
       transcript,
       mode,
@@ -402,6 +427,7 @@ router.post("/voice/parse", async (req: Request, res: Response) => {
       result = { action: "unknown" };
     }
 
+    logger.info({ requestId: req.id, mode, result }, "Voice parse completed");
     res.json(result);
   } catch (err) {
     logger.error({ err, requestId: req.id }, "Voice parse failed");

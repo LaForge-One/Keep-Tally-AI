@@ -1,7 +1,7 @@
 import { useRef, useCallback, useEffect } from "react";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
-const SPEAK_TIMEOUT_MS = 3500;
+const SPEAK_TIMEOUT_MS = 12000;
 const TRANSCRIBE_TIMEOUT_MS = 18000;
 const END_OF_UTTERANCE_SILENCE_MS = 7000;
 
@@ -40,6 +40,10 @@ export type MicrophonePrecheckResult =
       message: string;
       details: string[];
     };
+
+function voiceLog(step: string, details?: Record<string, unknown>) {
+  console.info("[KeepTally voice]", step, details ?? {});
+}
 
 function getRecordingMimeType() {
   if (typeof MediaRecorder === "undefined") return "";
@@ -202,6 +206,7 @@ export function useAIVoice() {
     if (abortedRef.current) return;
 
     try {
+      voiceLog("tts.request", { textLength: text.length, timeoutMs: SPEAK_TIMEOUT_MS });
       const res = await fetchWithTimeout(`${BASE}/api/voice/speak`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -212,24 +217,29 @@ export function useAIVoice() {
       });
 
       if (!res.ok || abortedRef.current) {
+        voiceLog("tts.fallback", { status: res.status, statusText: res.statusText });
         await speakWithBrowserTts(text);
         return;
       }
 
       const arrayBuffer = await res.arrayBuffer();
       if (abortedRef.current) return;
+      voiceLog("tts.audio-received", { bytes: arrayBuffer.byteLength });
 
       const { el, promise } = playAudioBuffer(arrayBuffer);
       currentAudioRef.current = el;
       await promise;
+      voiceLog("tts.playback-complete");
       currentAudioRef.current = null;
-    } catch {
+    } catch (err) {
+      voiceLog("tts.error-fallback", { error: err instanceof Error ? err.message : String(err) });
       await speakWithBrowserTts(text);
     }
   }, []);
 
   const speakBrowser = useCallback(async (text: string): Promise<void> => {
     if (abortedRef.current) return;
+    voiceLog("browser-tts.request", { textLength: text.length });
     await speakWithBrowserTts(text);
   }, []);
 
@@ -305,6 +315,7 @@ export function useAIVoice() {
     timeoutMs = 8000,
     onProgress?: (progress: ListenProgress) => void,
   ): Promise<ListenResult> => {
+    voiceLog("listen.start", { timeoutMs });
     if (abortedRef.current) return { ok: false, reason: "aborted" };
     discardRecordingRef.current = false;
     if (!window.isSecureContext || typeof MediaRecorder === "undefined" || !navigator.mediaDevices?.getUserMedia) {
@@ -316,11 +327,15 @@ export function useAIVoice() {
     try {
       onProgress?.({ state: "requesting-microphone" });
       stream = await getMicrophoneStream();
-    } catch {
+    } catch (err) {
+      voiceLog("listen.microphone-denied", { error: err instanceof Error ? err.message : String(err) });
       return { ok: false, reason: "microphone-denied" };
     }
 
-    if (!stream) return { ok: false, reason: "microphone-timeout" };
+    if (!stream) {
+      voiceLog("listen.microphone-timeout");
+      return { ok: false, reason: "microphone-timeout" };
+    }
 
     if (abortedRef.current) {
       stream.getTracks().forEach((track) => track.stop());
@@ -335,7 +350,8 @@ export function useAIVoice() {
       let recorder: MediaRecorder;
       try {
         recorder = new MediaRecorder(stream!, mimeType ? { mimeType } : undefined);
-      } catch {
+      } catch (err) {
+        voiceLog("listen.recorder-unsupported", { error: err instanceof Error ? err.message : String(err) });
         stream!.getTracks().forEach((track) => track.stop());
         resolve({ ok: false, reason: "unsupported" });
         return;
@@ -363,6 +379,7 @@ export function useAIVoice() {
         onProgress?.({ state: "recording", level });
       });
       onProgress?.({ state: "recording", level: 0 });
+      voiceLog("listen.recording", { mimeType: mimeType || "browser-default" });
       recorder.start(250);
 
       recorder.onstop = async () => {
@@ -384,12 +401,14 @@ export function useAIVoice() {
           return;
         }
         if (chunks.length === 0) {
+          voiceLog("listen.silent", { chunks: 0 });
           resolve({ ok: false, reason: "silent" });
           return;
         }
 
         const blob = new Blob(chunks, { type: mimeType || "audio/webm" });
         if (blob.size < 1000) {
+          voiceLog("listen.silent", { chunks: chunks.length, bytes: blob.size });
           resolve({ ok: false, reason: "silent" });
           return;
         }
@@ -397,6 +416,7 @@ export function useAIVoice() {
         try {
           const formData = new FormData();
           formData.append("audio", blob, "recording.webm");
+          voiceLog("transcribe.request", { bytes: blob.size, mimeType: blob.type, chunks: chunks.length });
 
           const res = await fetchWithTimeout(`${BASE}/api/voice/transcribe`, {
             method: "POST",
@@ -407,12 +427,15 @@ export function useAIVoice() {
           });
 
           if (!res.ok) {
+            voiceLog("transcribe.failed", { status: res.status, statusText: res.statusText });
             resolve({ ok: false, reason: "transcription-failed" });
             return;
           }
           const data = (await res.json()) as { transcript?: string };
+          voiceLog("transcribe.success", { transcript: data.transcript ?? "" });
           resolve({ ok: true, transcript: (data.transcript ?? "").toLowerCase().trim() });
-        } catch {
+        } catch (err) {
+          voiceLog("transcribe.error", { error: err instanceof Error ? err.message : String(err) });
           resolve({ ok: false, reason: "transcription-failed" });
         }
       };

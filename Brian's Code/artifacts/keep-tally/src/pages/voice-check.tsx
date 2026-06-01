@@ -62,6 +62,7 @@ type CountMode = "all" | "low-stock" | "category" | "custom";
 
 type ResultStatus = "verified" | "updated-lower" | "updated-higher" | "skipped" | "no-response";
 type ConfirmationChoice = "yes" | "no";
+type VoiceDebugEntry = { at: string; step: string; detail?: string };
 
 interface SessionResult {
   item: Item;
@@ -408,6 +409,7 @@ export default function VoiceCheck() {
   const [statusMessage, setStatusMessage] = useState("");
   const [lastHeard, setLastHeard] = useState("");
   const [voiceNotice, setVoiceNotice] = useState("");
+  const [voiceDebugEntries, setVoiceDebugEntries] = useState<VoiceDebugEntry[]>([]);
   const [voiceCapture, setVoiceCapture] = useState<ListenProgress | null>(null);
   const [pendingConfirmation, setPendingConfirmation] = useState<{ item: Item; quantity: number } | null>(null);
   const [aiStatus, setAiStatus] = useState<AIStatus | null>(null);
@@ -423,6 +425,7 @@ export default function VoiceCheck() {
   const currentIndexRef = useRef(0);
   const sessionResultsRef = useRef<SessionResult[]>([]);
   const isRunningRef = useRef(false);
+  const lastVoiceLevelLogAtRef = useRef(0);
   const confirmationResolverRef = useRef<((choice: ConfirmationChoice) => void) | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const wakeLockRef = useRef<any>(null);
@@ -512,33 +515,59 @@ export default function VoiceCheck() {
     setSessionResults([...sessionResultsRef.current]);
   }, []);
 
+  const logVoiceStep = useCallback((step: string, detail?: string | Record<string, unknown>) => {
+    const detailText =
+      typeof detail === "string"
+        ? detail
+        : detail
+          ? JSON.stringify(detail)
+          : undefined;
+    const entry = {
+      at: new Date().toLocaleTimeString(),
+      step,
+      detail: detailText,
+    };
+    console.info("[KeepTally voice workflow]", step, detail ?? {});
+    setVoiceDebugEntries((current) => [entry, ...current].slice(0, 12));
+  }, []);
+
   /* ── Voice helpers ── */
   const safeSpeak = useCallback(async (text: string, opts: { audible?: boolean } = {}): Promise<boolean> => {
     if (controlRef.current.shouldStop || controlRef.current.shouldPause) return false;
     const shouldPlayAudio = opts.audible ?? true;
     setStatusMessage(text);
     vibrate(30);
+    logVoiceStep("speak.request", { text, openAiTts: VOICE_COUNT_TTS_ENABLED, audible: shouldPlayAudio });
     if (VOICE_COUNT_TTS_ENABLED) {
       await speak(text);
     } else if (shouldPlayAudio && VOICE_COUNT_CONFIRMATION_AUDIO_ENABLED) {
       await speakBrowser(text);
     }
+    logVoiceStep("speak.complete", { text });
     return !controlRef.current.shouldStop && !controlRef.current.shouldPause;
-  }, [speak, speakBrowser]);
+  }, [logVoiceStep, speak, speakBrowser]);
 
   const safeListen = useCallback(async (timeoutMs: number): Promise<string | null> => {
     if (controlRef.current.shouldStop || controlRef.current.shouldPause) return null;
     vibrate([50, 30, 50]);
     setVoiceCapture({ state: "requesting-microphone" });
     setStatusMessage("Opening microphone...");
+    logVoiceStep("listen.start", { timeoutMs });
     const result = await listenDetailed(timeoutMs, (progress) => {
       setVoiceCapture(progress);
       if (progress.state === "requesting-microphone") {
         setStatusMessage("Opening microphone...");
+        logVoiceStep("listen.microphone-opening");
       } else if (progress.state === "recording") {
         setStatusMessage("Recording voice...");
+        const now = Date.now();
+        if (progress.level > 0 && now - lastVoiceLevelLogAtRef.current > 1500) {
+          lastVoiceLevelLogAtRef.current = now;
+          logVoiceStep("listen.recording", { level: progress.level });
+        }
       } else if (progress.state === "transcribing") {
         setStatusMessage("Transcribing audio...");
+        logVoiceStep("transcribe.start");
       }
     });
     setVoiceCapture(null);
@@ -546,6 +575,7 @@ export default function VoiceCheck() {
     if (controlRef.current.shouldSkip || controlRef.current.shouldRepeat) return "";
     if (!result.ok) {
       const message = listenMessage(result);
+      logVoiceStep("listen.failed", { reason: result.reason, message });
       if (message) {
         setVoiceNotice(message);
         setStatusMessage(message);
@@ -567,14 +597,17 @@ export default function VoiceCheck() {
     setVoiceNotice("");
     setLastHeard(transcript || "");
     setStatusMessage(transcript ? `Heard "${transcript}".` : "No speech was transcribed.");
+    logVoiceStep("transcribe.success", { transcript });
     return transcript;
-  }, [listenDetailed]);
+  }, [listenDetailed, logVoiceStep]);
 
   const runMicPrecheck = useCallback(async () => {
     setMicChecking(true);
     setVoiceNotice("");
+    logVoiceStep("mic-precheck.start");
     try {
       const result = await precheckMicrophone();
+      logVoiceStep("mic-precheck.complete", { ok: result.ok, message: result.message, details: result.details });
       setMicPrecheck(result);
       toast({
         title: result.ok ? "Microphone ready" : "Microphone check failed",
@@ -586,7 +619,7 @@ export default function VoiceCheck() {
     } finally {
       setMicChecking(false);
     }
-  }, [precheckMicrophone]);
+  }, [logVoiceStep, precheckMicrophone]);
 
   const notifySaveFailed = useCallback(async () => {
     const message = "Could not save that count. Check the connection, then try again.";
@@ -619,6 +652,7 @@ export default function VoiceCheck() {
 
   const confirmSpokenCount = useCallback(async (item: Item, quantity: number) => {
     const message = `I heard ${item.name}, count ${quantity}. Say yes to save, or no to try again.`;
+    logVoiceStep("confirm.prompt", { item: item.name, quantity });
     setVoiceNotice(message);
     setStatusMessage(message);
     setPendingConfirmation({ item, quantity });
@@ -640,10 +674,12 @@ export default function VoiceCheck() {
       ]);
 
       if (confirmation === "yes") {
+        logVoiceStep("confirm.accepted", { item: item.name, quantity });
         setVoiceNotice("");
         return true;
       }
       if (confirmation === "no") {
+        logVoiceStep("confirm.rejected", { item: item.name, quantity });
         const retryMessage = "Okay, not saved. Try that item again.";
         setVoiceNotice(retryMessage);
         await safeSpeak(retryMessage, { audible: true });
@@ -651,6 +687,7 @@ export default function VoiceCheck() {
       }
 
       const unclearMessage = "I could not confirm that, so I did not save it. Use Confirm Save or try again.";
+      logVoiceStep("confirm.unknown", { item: item.name, quantity });
       setVoiceNotice(unclearMessage);
       await safeSpeak(unclearMessage, { audible: true });
       return false;
@@ -658,7 +695,7 @@ export default function VoiceCheck() {
       confirmationResolverRef.current = null;
       setPendingConfirmation(null);
     }
-  }, [safeListen, safeSpeak]);
+  }, [logVoiceStep, safeListen, safeSpeak]);
 
   /* ── QUEUE-BASED session (All / Low-Stock / Category) ── */
   const runSession = useCallback(async (queue: Item[], startIndex: number) => {
@@ -800,10 +837,14 @@ export default function VoiceCheck() {
 
   /* ── AI VOICE session (Custom mode) ── */
   const runCustomSession = useCallback(async (sessionItems: Item[]) => {
-    if (isRunningRef.current) return;
+    if (isRunningRef.current) {
+      logVoiceStep("custom.start.ignored", "Session is already running.");
+      return;
+    }
     isRunningRef.current = true;
     controlRef.current = { shouldStop: false, shouldSkip: false, shouldRepeat: false, shouldPause: false };
     try {
+      logVoiceStep("custom.start", { items: sessionItems.length, location: sessionLocation });
       setVoiceNotice("");
       setStatusMessage("Starting AI voice listener...");
       setPhase("custom-listening");
@@ -820,21 +861,32 @@ export default function VoiceCheck() {
         // Long listen window — user initiates each entry
         const transcript = await safeListen(20000);
 
-        if (transcript === null) break;
+        if (transcript === null) {
+          logVoiceStep("custom.listen.returned-null");
+          break;
+        }
 
         // Silence / timeout → stay listening
-        if (!transcript.trim()) continue;
+        if (!transcript.trim()) {
+          logVoiceStep("custom.listen.empty-transcript");
+          continue;
+        }
 
         // Stop commands
-        if (/\b(done|stop|finish|exit|end|quit)\b/.test(transcript)) break;
+        if (/\b(done|stop|finish|exit|end|quit)\b/.test(transcript)) {
+          logVoiceStep("custom.stop-command", { transcript });
+          break;
+        }
 
         setStatusMessage(`Heard "${transcript}". Matching item...`);
+        logVoiceStep("custom.match.start", { transcript, itemCount: sessionItems.length });
 
         // Try deterministic database-backed matching first; use AI only as a fallback.
         const localParse = parseVoiceCommand(transcript, sessionItems);
         let aiCustom: GPTParseResult = { action: "unknown" };
         if (localParse && "ambiguous" in localParse) {
           const candidates = localParse.ambiguous.map((item) => item.name).join(", ");
+          logVoiceStep("custom.match.ambiguous", { transcript, candidates });
           const message = `I heard "${transcript}", but that could be ${candidates}. Please say a more specific item name.`;
           setVoiceNotice(message);
           setStatusMessage(message);
@@ -842,6 +894,11 @@ export default function VoiceCheck() {
           continue;
         }
         if (localParse && "item" in localParse) {
+          logVoiceStep("custom.match.local", {
+            transcript,
+            item: localParse.item.name,
+            quantity: localParse.quantity,
+          });
           aiCustom = {
             action: "custom",
             itemId: localParse.item.id,
@@ -849,12 +906,18 @@ export default function VoiceCheck() {
             quantity: localParse.quantity,
           };
         } else {
+          logVoiceStep("custom.match.ai-request", { transcript });
           aiCustom = await parseWithAI(transcript, "custom", voiceCandidateItems(transcript, sessionItems));
+          logVoiceStep("custom.match.ai-response", aiCustom);
         }
 
-        if (aiCustom.action === "done") break;
+        if (aiCustom.action === "done") {
+          logVoiceStep("custom.done-action");
+          break;
+        }
 
         if (aiCustom.action !== "custom") {
+          logVoiceStep("custom.match.failed", { transcript, action: aiCustom.action });
           const message = `I heard "${transcript}", but I could not match that to an item and count in ${sessionLocation ?? "this location"}. Try the full item name plus a number.`;
           setVoiceNotice(message);
           setStatusMessage(message);
@@ -864,6 +927,7 @@ export default function VoiceCheck() {
 
         const item = sessionItems.find((it) => it.id === aiCustom.itemId) ?? null;
         if (!item) {
+          logVoiceStep("custom.match.item-not-in-location", aiCustom);
           const message = `I matched ${aiCustom.itemName}, but it is not available in ${sessionLocation ?? "this location"}. Try another item name.`;
           setVoiceNotice(message);
           setStatusMessage(message);
@@ -872,27 +936,32 @@ export default function VoiceCheck() {
         }
 
         const quantity = aiCustom.quantity;
+        logVoiceStep("custom.match.confirmed", { item: item.name, quantity, systemQuantity: item.quantity });
         setCustomMatchedItem(item);
         setCustomSpokenQty(quantity);
         setStatusMessage(`Matched ${item.name}, count ${quantity}. Waiting for confirmation.`);
 
         if (!(await confirmSpokenCount(item, quantity))) {
+          logVoiceStep("custom.save.skipped-after-confirmation", { item: item.name, quantity });
           addResult({ item, expected: item.quantity, counted: null, diff: null, status: "skipped", adjustmentType: null });
           continue;
         }
 
         setStatusMessage(`Saving ${item.name}, count ${quantity}...`);
+        logVoiceStep("custom.save.start", { item: item.name, quantity, systemQuantity: item.quantity });
         if (quantity === item.quantity) {
           vibrate(100);
           try {
             await logVerification(item);
           } catch {
+            logVoiceStep("custom.save.failed", { item: item.name, quantity, operation: "verify" });
             await notifySaveFailed();
             addResult({ item, expected: item.quantity, counted: null, diff: null, status: "no-response", adjustmentType: null });
             continue;
           }
           await safeSpeak("OK");
           addResult({ item, expected: item.quantity, counted: quantity, diff: 0, status: "verified", adjustmentType: null });
+          logVoiceStep("custom.save.verified", { item: item.name, quantity });
           await notifyCountSaved(`${item.name}: count ${quantity} verified and written to inventory history.`);
 
         } else if (quantity > item.quantity) {
@@ -904,11 +973,13 @@ export default function VoiceCheck() {
           try {
             await saveAdjustment(item.id, quantity, "Adjustment", false);
           } catch {
+            logVoiceStep("custom.save.failed", { item: item.name, quantity, operation: "adjust-higher" });
             await notifySaveFailed();
             addResult({ item, expected: item.quantity, counted: null, diff: null, status: "no-response", adjustmentType: null });
             continue;
           }
           addResult({ item, expected: item.quantity, counted: quantity, diff: quantity - item.quantity, status: "updated-higher", adjustmentType: "Adjustment" });
+          logVoiceStep("custom.save.updated-higher", { item: item.name, quantity });
           await notifyCountSaved(`${item.name}: count updated to ${quantity} and written to inventory history.`);
 
         } else {
@@ -936,12 +1007,14 @@ export default function VoiceCheck() {
           try {
             await saveAdjustment(item.id, quantity, reason, false);
           } catch {
+            logVoiceStep("custom.save.failed", { item: item.name, quantity, reason, operation: "adjust-lower" });
             setPendingCounted(null);
             await notifySaveFailed();
             addResult({ item, expected: item.quantity, counted: null, diff: null, status: "no-response", adjustmentType: null });
             continue;
           }
           addResult({ item, expected: item.quantity, counted: quantity, diff: quantity - item.quantity, status: "updated-lower", adjustmentType: reason });
+          logVoiceStep("custom.save.updated-lower", { item: item.name, quantity, reason });
           await notifyCountSaved(`${item.name}: count updated to ${quantity} with reason ${reason} and written to inventory history.`);
           vibrate([50, 50, 100]);
           setPendingCounted(null);
@@ -949,6 +1022,7 @@ export default function VoiceCheck() {
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown voice workflow error";
+      logVoiceStep("custom.error", { message });
       const notice = `AI voice count could not start: ${message}`;
       setVoiceNotice(notice);
       setStatusMessage(notice);
@@ -960,6 +1034,7 @@ export default function VoiceCheck() {
     }
 
     isRunningRef.current = false;
+    logVoiceStep("custom.end", { paused: controlRef.current.shouldPause, stopped: controlRef.current.shouldStop });
     releaseWakeLock();
 
     if (controlRef.current.shouldPause) {
@@ -968,7 +1043,7 @@ export default function VoiceCheck() {
       await safeSpeak("Count complete.");
       setPhase("complete");
     }
-  }, [safeSpeak, safeListen, addResult, acquireWakeLock, releaseWakeLock, notifySaveFailed, confirmLargeChange, confirmSpokenCount, notifyCountSaved]);
+  }, [safeSpeak, safeListen, addResult, acquireWakeLock, releaseWakeLock, notifySaveFailed, confirmLargeChange, confirmSpokenCount, notifyCountSaved, logVoiceStep, sessionLocation]);
 
   /* ── Build queue & start ── */
   const buildQueue = useCallback((): Item[] => {
@@ -982,11 +1057,25 @@ export default function VoiceCheck() {
   }, [countMode, items, selectedCategory]);
 
   const handleStart = useCallback(async () => {
-    if (!countMode || isRunningRef.current) return;
+    if (!countMode) {
+      logVoiceStep("start.ignored", "No count mode selected.");
+      return;
+    }
+    if (isRunningRef.current) {
+      logVoiceStep("start.ignored", "Session is already running.");
+      return;
+    }
 
     resetVoiceSession();
     sessionResultsRef.current = [];
     setSessionResults([]);
+    setVoiceDebugEntries([]);
+    logVoiceStep("start.clicked", {
+      countMode,
+      location: sessionLocation,
+      items: items.length,
+      micPrecheckOk: Boolean(micPrecheck?.ok),
+    });
     setCurrentIndex(0);
     currentIndexRef.current = 0;
     setLastHeard("");
@@ -998,6 +1087,7 @@ export default function VoiceCheck() {
 
     const queue = countMode === "custom" ? [] : buildQueue();
     if (countMode !== "custom" && queue.length === 0) {
+      logVoiceStep("start.blocked", "No items are queued for this count mode.");
       setVoiceNotice("No items are queued for this count mode.");
       return;
     }
@@ -1008,6 +1098,7 @@ export default function VoiceCheck() {
     if (!micPrecheck?.ok) {
       const ready = await runMicPrecheck();
       if (!ready) {
+        logVoiceStep("start.blocked", "Microphone precheck failed.");
         setPhase("select-mode");
         setStatusMessage("");
         return;
@@ -1015,8 +1106,10 @@ export default function VoiceCheck() {
     }
 
     if (countMode === "custom") {
+      logVoiceStep("start.custom-session", { items: items.length });
       runCustomSession(items);
     } else {
+      logVoiceStep("start.queue-session", { queue: queue.length });
       runSession(queue, 0);
     }
   }, [
@@ -1028,6 +1121,8 @@ export default function VoiceCheck() {
     micPrecheck,
     runMicPrecheck,
     resetVoiceSession,
+    logVoiceStep,
+    sessionLocation,
   ]);
 
   const handlePause = useCallback(() => {
@@ -1190,6 +1285,26 @@ export default function VoiceCheck() {
             <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
               <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
               <span>{voiceNotice}</span>
+            </div>
+          )}
+
+          {voiceDebugEntries.length > 0 && (
+            <div className="rounded-xl border border-border bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground">
+              <div className="mb-1 flex items-center justify-between">
+                <span className="font-bold uppercase tracking-wide text-foreground">Voice diagnostic log</span>
+                <span>{voiceDebugEntries.length} events</span>
+              </div>
+              <div className="max-h-28 space-y-1 overflow-auto">
+                {voiceDebugEntries.slice(0, 6).map((entry, index) => (
+                  <div key={`${entry.at}-${entry.step}-${index}`} className="grid grid-cols-[4.8rem_1fr] gap-2">
+                    <span className="tabular-nums">{entry.at}</span>
+                    <span className="truncate">
+                      <span className="font-semibold text-foreground">{entry.step}</span>
+                      {entry.detail ? <span> - {entry.detail}</span> : null}
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
@@ -1632,6 +1747,26 @@ export default function VoiceCheck() {
           <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-900 dark:bg-amber-950/30 dark:border-amber-800 dark:text-amber-200">
             <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
             <span>{locationsError} Showing fallback location names.</span>
+          </div>
+        )}
+
+        {voiceDebugEntries.length > 0 && phase !== "setup" && (
+          <div className="rounded-xl border border-border bg-muted/30 px-4 py-3 text-xs text-muted-foreground">
+            <div className="mb-2 flex items-center justify-between">
+              <span className="font-bold uppercase tracking-wide text-foreground">Voice diagnostic log</span>
+              <span>{voiceDebugEntries.length} events</span>
+            </div>
+            <div className="space-y-1">
+              {voiceDebugEntries.slice(0, 6).map((entry, index) => (
+                <div key={`${entry.at}-${entry.step}-page-${index}`} className="grid grid-cols-[5rem_1fr] gap-2">
+                  <span className="tabular-nums">{entry.at}</span>
+                  <span>
+                    <span className="font-semibold text-foreground">{entry.step}</span>
+                    {entry.detail ? <span> - {entry.detail}</span> : null}
+                  </span>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
