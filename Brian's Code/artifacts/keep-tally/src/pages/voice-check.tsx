@@ -147,7 +147,7 @@ function parseReason(transcript: string): string {
 function parseConfirmation(transcript: string): "yes" | "no" | "unknown" {
   const t = transcript.toLowerCase().trim();
   if (!t) return "unknown";
-  if (/\b(yes|yeah|yep|correct|right|confirmed|confirm|ok|okay|save|proceed|do it|that's right|that is right)\b/.test(t)) {
+  if (/\b(yes|yeah|yep|correct|right|confirmed|confirm|affirmative|agreed|approve|approved|ok|okay|save|save it|proceed|do it|that's right|that is right)\b/.test(t)) {
     return "yes";
   }
   if (/\b(no|nope|cancel|wrong|incorrect|retry|try again|don't save|do not save|skip)\b/.test(t)) {
@@ -900,6 +900,28 @@ export default function VoiceCheck() {
         }
 
         const counted = aiQty.action === "verify" ? item.quantity : (aiQty as { action: "count"; quantity: number }).quantity;
+        const confirmed = await confirmSpokenCount(item, counted);
+        if (!confirmed) {
+          await logVoiceAuditEvent({
+            eventType: "confirmation_rejected",
+            item,
+            action: aiQty.action === "verify" || counted === item.quantity ? "verify" : "adjust",
+            expectedQuantity: item.quantity,
+            countedQuantity: counted,
+            transcript,
+          });
+          addResult({ item, expected: item.quantity, counted: null, diff: null, status: "skipped", adjustmentType: null });
+          break itemLoop;
+        }
+
+        await logVoiceAuditEvent({
+          eventType: "confirmation_accepted",
+          item,
+          action: aiQty.action === "verify" || counted === item.quantity ? "verify" : "adjust",
+          expectedQuantity: item.quantity,
+          countedQuantity: counted,
+          transcript,
+        });
 
         if (aiQty.action === "verify" || counted === item.quantity) {
           vibrate(100);
@@ -917,7 +939,6 @@ export default function VoiceCheck() {
             addResult({ item, expected: item.quantity, counted: null, diff: null, status: "no-response", adjustmentType: null });
             break itemLoop;
           }
-          await safeSpeak("Got it.");
           addResult({ item, expected: item.quantity, counted: item.quantity, diff: 0, status: "verified", adjustmentType: null });
           await logVoiceAuditEvent({
             eventType: "save_succeeded",
@@ -928,6 +949,7 @@ export default function VoiceCheck() {
             countedQuantity: item.quantity,
             transcript,
           });
+          await notifyCountSaved(`${item.name}: count ${item.quantity} verified and written to inventory history.`);
           break itemLoop;
         }
 
@@ -960,7 +982,7 @@ export default function VoiceCheck() {
             countedQuantity: counted,
             transcript,
           });
-          await safeSpeak(`Got ${counted}. Saved.`);
+          await notifyCountSaved(`${item.name}: count updated to ${counted} and written to inventory history.`);
           break itemLoop;
         }
 
@@ -1012,7 +1034,7 @@ export default function VoiceCheck() {
             transcript,
           });
           vibrate([50, 50, 100]);
-          await safeSpeak(`Saved as ${reason}.`);
+          await notifyCountSaved(`${item.name}: count updated to ${counted} with reason ${reason} and written to inventory history.`);
           setPendingCounted(null);
           break itemLoop;
         }
@@ -1033,7 +1055,7 @@ export default function VoiceCheck() {
       await completeVoiceAuditSession("completed");
       setPhase("complete");
     }
-  }, [safeSpeak, safeListen, addResult, acquireWakeLock, releaseWakeLock, items, notifySaveFailed, confirmLargeChange, countMode, startVoiceAuditSession, logVoiceAuditEvent, completeVoiceAuditSession]);
+  }, [safeSpeak, safeListen, addResult, acquireWakeLock, releaseWakeLock, items, notifySaveFailed, notifyCountSaved, confirmLargeChange, confirmSpokenCount, countMode, startVoiceAuditSession, logVoiceAuditEvent, completeVoiceAuditSession]);
 
   /* ── AI VOICE session (Custom mode) ── */
   const runCustomSession = useCallback(async (sessionItems: Item[]) => {
