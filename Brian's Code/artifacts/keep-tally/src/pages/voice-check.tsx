@@ -35,6 +35,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import type { Item } from "@workspace/api-client-react";
+import { parseVoiceCountConfirmation } from "@/lib/voice-count-workflow";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const LARGE_DELTA_MULTIPLIER = 2;
@@ -145,15 +146,7 @@ function parseReason(transcript: string): string {
 }
 
 function parseConfirmation(transcript: string): "yes" | "no" | "unknown" {
-  const t = transcript.toLowerCase().trim();
-  if (!t) return "unknown";
-  if (/\b(yes|yeah|yep|correct|right|confirmed|confirm|affirmative|agreed|approve|approved|ok|okay|save|save it|proceed|do it|that's right|that is right)\b/.test(t)) {
-    return "yes";
-  }
-  if (/\b(no|nope|cancel|wrong|incorrect|retry|try again|don't save|do not save|skip)\b/.test(t)) {
-    return "no";
-  }
-  return "unknown";
+  return parseVoiceCountConfirmation(transcript);
 }
 
 const COMPLETION_COMMAND_RE = /\b(done|stop|finish|finished|complete|completed|that'?s all|all done|end|exit|quit)\b/gi;
