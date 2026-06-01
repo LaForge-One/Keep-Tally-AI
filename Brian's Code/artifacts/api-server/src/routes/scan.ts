@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq, and, ne, inArray } from "drizzle-orm";
+import { eq, and, inArray, or } from "drizzle-orm";
 import { z } from "zod";
 import {
   db,
@@ -89,43 +89,46 @@ router.get("/scan/lookup", async (req, res) => {
   const resolvedLocation = location ? await resolveLocationByName(req, res, location) : null;
   if (location && !resolvedLocation) return;
 
-  // Find in the selected store (location)
-  const storeItems = location
-    ? mergeById([
-        await db.select().from(itemsTable).where(
-          and(eq(itemsTable.accountId, req.account!.id), eq(itemsTable.barcode, barcode), eq(itemsTable.locationId, resolvedLocation!.id))
-        ),
-        await db.select().from(itemsTable).where(
-          and(eq(itemsTable.accountId, req.account!.id), eq(itemsTable.barcode, barcode), eq(itemsTable.location, resolvedLocation!.name))
-        ),
-      ])
+  const allowedLocationIds = req.allowedLocationIds ?? [];
+  const legacyLocations = req.authUser?.assignedLocations ?? [];
+  const barcodeItems = location
+    ? await db
+        .select()
+        .from(itemsTable)
+        .where(
+          canViewAllLocations(req)
+            ? and(eq(itemsTable.accountId, req.account!.id), eq(itemsTable.barcode, barcode))
+            : and(
+                eq(itemsTable.accountId, req.account!.id),
+                eq(itemsTable.barcode, barcode),
+                or(eq(itemsTable.locationId, resolvedLocation!.id), eq(itemsTable.location, resolvedLocation!.name)),
+              ),
+        )
     : canViewAllLocations(req)
       ? await db.select().from(itemsTable).where(and(eq(itemsTable.accountId, req.account!.id), eq(itemsTable.barcode, barcode)))
-      : (req.allowedLocationIds ?? []).length > 0 || (req.authUser?.assignedLocations ?? []).length > 0
-        ? mergeById([
-            (req.allowedLocationIds ?? []).length > 0
-              ? await db.select().from(itemsTable).where(
-                  and(eq(itemsTable.accountId, req.account!.id), eq(itemsTable.barcode, barcode), inArray(itemsTable.locationId, req.allowedLocationIds ?? []))
-                )
-              : [],
-            (req.authUser?.assignedLocations ?? []).length > 0
-              ? await db.select().from(itemsTable).where(
-                  and(eq(itemsTable.accountId, req.account!.id), eq(itemsTable.barcode, barcode), inArray(itemsTable.location, req.authUser?.assignedLocations ?? []))
-                )
-              : [],
-          ])
-        : [];
+      : allowedLocationIds.length > 0 && legacyLocations.length > 0
+        ? await db.select().from(itemsTable).where(
+            and(
+              eq(itemsTable.accountId, req.account!.id),
+              eq(itemsTable.barcode, barcode),
+              or(inArray(itemsTable.locationId, allowedLocationIds), inArray(itemsTable.location, legacyLocations)),
+            ),
+          )
+        : allowedLocationIds.length > 0
+          ? await db.select().from(itemsTable).where(
+              and(eq(itemsTable.accountId, req.account!.id), eq(itemsTable.barcode, barcode), inArray(itemsTable.locationId, allowedLocationIds)),
+            )
+          : legacyLocations.length > 0
+            ? await db.select().from(itemsTable).where(
+                and(eq(itemsTable.accountId, req.account!.id), eq(itemsTable.barcode, barcode), inArray(itemsTable.location, legacyLocations)),
+              )
+            : [];
 
-  // Find in other locations (warehouse / other stores)
+  const storeItems = location
+    ? barcodeItems.filter((item) => item.locationId === resolvedLocation!.id || item.location === resolvedLocation!.name)
+    : barcodeItems;
   const otherItems = location && canViewAllLocations(req)
-    ? mergeById([
-        await db.select().from(itemsTable).where(
-          and(eq(itemsTable.accountId, req.account!.id), eq(itemsTable.barcode, barcode), ne(itemsTable.locationId, resolvedLocation!.id))
-        ),
-        await db.select().from(itemsTable).where(
-          and(eq(itemsTable.accountId, req.account!.id), eq(itemsTable.barcode, barcode), ne(itemsTable.location, resolvedLocation!.name))
-        ),
-      ])
+    ? barcodeItems.filter((item) => item.locationId !== resolvedLocation!.id && item.location !== resolvedLocation!.name)
     : [];
 
   if (storeItems.length === 0 && otherItems.length === 0) {

@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, or } from "drizzle-orm";
 import {
   db,
   itemsTable,
@@ -88,21 +88,23 @@ async function loadCommandItems(req: Request): Promise<ItemRow[]> {
   const assignedLocations = req.authUser?.assignedLocations ?? [];
   if (allowedLocationIds.length === 0 && assignedLocations.length === 0) return [];
 
-  const byLocationId = allowedLocationIds.length > 0
-    ? await db.select().from(itemsTable).where(and(eq(itemsTable.accountId, req.account!.id), inArray(itemsTable.locationId, allowedLocationIds)))
-    : [];
-  const byLegacyLocation = assignedLocations.length > 0
-    ? await db.select().from(itemsTable).where(and(eq(itemsTable.accountId, req.account!.id), inArray(itemsTable.location, assignedLocations)))
-    : [];
-  return mergeById([byLocationId, byLegacyLocation]);
-}
-
-function mergeById<T extends { id: number }>(rows: T[][]): T[] {
-  const merged = new Map<number, T>();
-  for (const group of rows) {
-    for (const row of group) merged.set(row.id, row);
+  if (allowedLocationIds.length > 0 && assignedLocations.length > 0) {
+    return db
+      .select()
+      .from(itemsTable)
+      .where(
+        and(
+          eq(itemsTable.accountId, req.account!.id),
+          or(inArray(itemsTable.locationId, allowedLocationIds), inArray(itemsTable.location, assignedLocations)),
+        ),
+      );
   }
-  return Array.from(merged.values());
+
+  if (allowedLocationIds.length > 0) {
+    return db.select().from(itemsTable).where(and(eq(itemsTable.accountId, req.account!.id), inArray(itemsTable.locationId, allowedLocationIds)));
+  }
+
+  return db.select().from(itemsTable).where(and(eq(itemsTable.accountId, req.account!.id), inArray(itemsTable.location, assignedLocations)));
 }
 
 function canAccessItem(req: Request, item: ItemRow): boolean {
