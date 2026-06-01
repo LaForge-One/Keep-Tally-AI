@@ -550,9 +550,13 @@ export default function VoiceCheck() {
     vibrate(30);
     logVoiceStep("speak.request", { text, openAiTts: VOICE_COUNT_TTS_ENABLED, audible: shouldPlayAudio });
     if (VOICE_COUNT_TTS_ENABLED) {
-      await speak(text);
+      const result = await speak(text);
+      logVoiceStep("speak.result", result);
     } else if (shouldPlayAudio && VOICE_COUNT_CONFIRMATION_AUDIO_ENABLED) {
-      await speakBrowser(text);
+      const result = await speakBrowser(text);
+      logVoiceStep("speak.result", result);
+    } else {
+      logVoiceStep("speak.skipped", { reason: "Audio disabled by voice settings" });
     }
     logVoiceStep("speak.complete", { text });
     return !controlRef.current.shouldStop && !controlRef.current.shouldPause;

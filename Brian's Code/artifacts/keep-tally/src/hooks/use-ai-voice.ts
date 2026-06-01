@@ -41,6 +41,15 @@ export type MicrophonePrecheckResult =
       details: string[];
     };
 
+export type SpeakResult = {
+  ok: boolean;
+  source: "openai" | "browser" | "browser-fallback" | "none";
+  status?: number;
+  bytes?: number;
+  playback?: "played" | "blocked" | "error";
+  error?: string;
+};
+
 function voiceLog(step: string, details?: Record<string, unknown>) {
   console.info("[KeepTally voice]", step, details ?? {});
 }
@@ -114,20 +123,23 @@ function createSilenceDetector(stream: MediaStream, onSilence: () => void, onLev
   };
 }
 
-function playAudioBuffer(buffer: ArrayBuffer): { el: HTMLAudioElement; promise: Promise<void> } {
+function playAudioBuffer(buffer: ArrayBuffer): { el: HTMLAudioElement; promise: Promise<{ playback: "played" | "blocked" | "error"; error?: string }> } {
   const blob = new Blob([buffer], { type: "audio/wav" });
   const url = URL.createObjectURL(blob);
   const audio = new Audio(url);
-  const promise = new Promise<void>((resolve) => {
+  const promise = new Promise<{ playback: "played" | "blocked" | "error"; error?: string }>((resolve) => {
     audio.onended = () => {
       URL.revokeObjectURL(url);
-      resolve();
+      resolve({ playback: "played" });
     };
     audio.onerror = () => {
       URL.revokeObjectURL(url);
-      resolve();
+      resolve({ playback: "error", error: "Audio element playback error" });
     };
-    audio.play().catch(() => resolve());
+    audio.play().catch((err) => {
+      URL.revokeObjectURL(url);
+      resolve({ playback: "blocked", error: err instanceof Error ? err.message : String(err) });
+    });
   });
   return { el: audio, promise };
 }
@@ -202,8 +214,8 @@ export function useAIVoice() {
     };
   }, []);
 
-  const speak = useCallback(async (text: string): Promise<void> => {
-    if (abortedRef.current) return;
+  const speak = useCallback(async (text: string): Promise<SpeakResult> => {
+    if (abortedRef.current) return { ok: false, source: "none", error: "Voice session aborted" };
 
     try {
       voiceLog("tts.request", { textLength: text.length, timeoutMs: SPEAK_TIMEOUT_MS });
@@ -217,30 +229,51 @@ export function useAIVoice() {
       });
 
       if (!res.ok || abortedRef.current) {
-        voiceLog("tts.fallback", { status: res.status, statusText: res.statusText });
+        const errorText = await res.text().catch(() => "");
+        voiceLog("tts.fallback", { status: res.status, statusText: res.statusText, errorText: errorText.slice(0, 300) });
         await speakWithBrowserTts(text);
-        return;
+        return {
+          ok: false,
+          source: "browser-fallback",
+          status: res.status,
+          error: errorText || res.statusText,
+        };
       }
 
       const arrayBuffer = await res.arrayBuffer();
-      if (abortedRef.current) return;
+      if (abortedRef.current) return { ok: false, source: "none", error: "Voice session aborted after TTS response" };
       voiceLog("tts.audio-received", { bytes: arrayBuffer.byteLength });
 
       const { el, promise } = playAudioBuffer(arrayBuffer);
       currentAudioRef.current = el;
-      await promise;
-      voiceLog("tts.playback-complete");
+      const playbackResult = await promise;
+      voiceLog("tts.playback-complete", playbackResult);
       currentAudioRef.current = null;
+      return {
+        ok: playbackResult.playback === "played",
+        source: "openai",
+        status: res.status,
+        bytes: arrayBuffer.byteLength,
+        playback: playbackResult.playback,
+        error: playbackResult.error,
+      };
     } catch (err) {
-      voiceLog("tts.error-fallback", { error: err instanceof Error ? err.message : String(err) });
+      const error = err instanceof Error ? err.message : String(err);
+      voiceLog("tts.error-fallback", { error });
       await speakWithBrowserTts(text);
+      return {
+        ok: false,
+        source: "browser-fallback",
+        error,
+      };
     }
   }, []);
 
-  const speakBrowser = useCallback(async (text: string): Promise<void> => {
-    if (abortedRef.current) return;
+  const speakBrowser = useCallback(async (text: string): Promise<SpeakResult> => {
+    if (abortedRef.current) return { ok: false, source: "none", error: "Voice session aborted" };
     voiceLog("browser-tts.request", { textLength: text.length });
     await speakWithBrowserTts(text);
+    return { ok: true, source: "browser" };
   }, []);
 
   const precheckMicrophone = useCallback(async (): Promise<MicrophonePrecheckResult> => {
