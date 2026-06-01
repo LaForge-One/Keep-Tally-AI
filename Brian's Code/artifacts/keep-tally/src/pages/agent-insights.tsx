@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 import type { ElementType } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Layout } from "@/components/layout";
@@ -6,13 +6,16 @@ import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
 import {
   AlertTriangle,
   ArrowRightLeft,
   Bot,
   Boxes,
   CheckCircle2,
+  Loader2,
   RefreshCw,
+  Send,
   ShieldCheck,
   TrendingDown,
 } from "lucide-react";
@@ -48,6 +51,23 @@ type HousekeepingResponse = {
     recentChangeCount: number;
   };
   recommendations: AgentRecommendation[];
+};
+
+type ChatMessage = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  source?: "ai" | "deterministic" | "deterministic-fallback";
+};
+
+type ConversationResponse = {
+  answer: string;
+  source: "ai" | "deterministic" | "deterministic-fallback";
+  generatedAt?: string;
+  context?: {
+    summary: HousekeepingResponse["summary"];
+    recommendationCount: number;
+  };
 };
 
 const GROUPS: Record<RecommendationType, { title: string; label: string; icon: ElementType }> = {
@@ -127,6 +147,18 @@ function RecommendationRow({ rec }: { rec: AgentRecommendation }) {
 }
 
 export default function AgentInsightsPage() {
+  const [chatInput, setChatInput] = useState("");
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
+    {
+      id: "welcome",
+      role: "assistant",
+      content: "Ask me about restock priorities, overstock, warehouse reorders, recent changes, or what needs attention first.",
+      source: "deterministic",
+    },
+  ]);
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatError, setChatError] = useState("");
+
   const { data, isLoading, isFetching, refetch, error } = useQuery<HousekeepingResponse>({
     queryKey: ["agent-housekeeping"],
     queryFn: async () => {
@@ -149,6 +181,65 @@ export default function AgentInsightsPage() {
 
   const totalRecommendations = data?.recommendations.length ?? 0;
   const agentConnected = Boolean(data && !error);
+
+  const sendMessage = async (event?: FormEvent) => {
+    event?.preventDefault();
+    const message = chatInput.trim();
+    if (!message || chatLoading) return;
+
+    const userMessage: ChatMessage = {
+      id: `user-${Date.now()}`,
+      role: "user",
+      content: message,
+    };
+    const nextMessages = [...chatMessages, userMessage];
+    setChatMessages(nextMessages);
+    setChatInput("");
+    setChatError("");
+    setChatLoading(true);
+
+    try {
+      const res = await fetch(`${BASE}/api/agents/conversation`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          message,
+          messages: nextMessages
+            .filter((entry) => entry.id !== "welcome")
+            .slice(-8)
+            .map(({ role, content }) => ({ role, content })),
+        }),
+      });
+      const payload = (await res.json()) as ConversationResponse | { error?: string; answer?: string; source?: ConversationResponse["source"] };
+      if (!res.ok && !payload.answer) {
+        throw new Error(payload.error ?? "Agent conversation failed");
+      }
+      setChatMessages((current) => [
+        ...current,
+        {
+          id: `assistant-${Date.now()}`,
+          role: "assistant",
+          content: payload.answer ?? "I could not generate an answer from the current agent context.",
+          source: payload.source ?? "deterministic-fallback",
+        },
+      ]);
+    } catch (err) {
+      const messageText = err instanceof Error ? err.message : "Agent conversation failed";
+      setChatError(messageText);
+      setChatMessages((current) => [
+        ...current,
+        {
+          id: `assistant-error-${Date.now()}`,
+          role: "assistant",
+          content: "I could not reach the conversation service. The recommendation cards below still show the current read-only checks.",
+          source: "deterministic-fallback",
+        },
+      ]);
+    } finally {
+      setChatLoading(false);
+    }
+  };
 
   return (
     <Layout>
@@ -213,6 +304,98 @@ export default function AgentInsightsPage() {
             </Badge>
           </div>
         </div>
+
+        <section className="grid gap-4 rounded-lg border border-border bg-card p-4 shadow-sm lg:grid-cols-[minmax(0,1fr)_18rem]">
+          <div className="min-w-0 space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10">
+                <Bot className="h-4 w-4 text-primary" />
+              </div>
+              <div>
+                <h2 className="text-sm font-bold text-foreground">Insights Conversation</h2>
+                <p className="text-xs text-muted-foreground">Read-only answers based on the current inventory and recommendation snapshot.</p>
+              </div>
+            </div>
+
+            <div className="max-h-80 space-y-3 overflow-auto rounded-md border border-border bg-muted/20 p-3">
+              {chatMessages.map((message) => (
+                <div
+                  key={message.id}
+                  className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
+                >
+                  <div
+                    className={
+                      message.role === "user"
+                        ? "max-w-[82%] rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground"
+                        : "max-w-[82%] rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground"
+                    }
+                  >
+                    <p className="whitespace-pre-line">{message.content}</p>
+                    {message.role === "assistant" && message.source && (
+                      <p className="mt-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        {message.source === "ai" ? "AI assisted" : "Rule-based fallback"}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {chatLoading && (
+                <div className="flex justify-start">
+                  <div className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm text-muted-foreground">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    Thinking through the current snapshot...
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {chatError && (
+              <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
+                {chatError}
+              </div>
+            )}
+
+            <form onSubmit={sendMessage} className="flex gap-2">
+              <Textarea
+                value={chatInput}
+                onChange={(event) => setChatInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    void sendMessage();
+                  }
+                }}
+                placeholder="Ask: What should we restock first?"
+                className="min-h-12 resize-none"
+                disabled={chatLoading}
+              />
+              <Button type="submit" className="h-12 px-4" disabled={chatLoading || !chatInput.trim()}>
+                {chatLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              </Button>
+            </form>
+          </div>
+
+          <div className="rounded-md border border-border bg-muted/20 p-3 text-xs text-muted-foreground">
+            <p className="font-bold uppercase tracking-wide text-foreground">Good questions</p>
+            <div className="mt-3 space-y-2">
+              {[
+                "What needs restocking first?",
+                "Any overstock problems?",
+                "What warehouse items need reordering?",
+                "Give me today's quick housekeeping summary.",
+              ].map((prompt) => (
+                <button
+                  key={prompt}
+                  type="button"
+                  onClick={() => setChatInput(prompt)}
+                  className="block w-full rounded-md border border-border bg-background px-3 py-2 text-left font-medium text-foreground hover:bg-muted"
+                >
+                  {prompt}
+                </button>
+              ))}
+            </div>
+          </div>
+        </section>
 
         {error ? (
           <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">

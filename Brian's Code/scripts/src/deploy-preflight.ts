@@ -96,6 +96,7 @@ add("db:migration files", migrationFiles.length > 0, `${migrationFiles.length} s
 add("db:latest lookup index migration", migrationFiles.includes("0006_lookup_indexes.sql"), "0006_lookup_indexes.sql");
 add("db:store min/max migration", migrationFiles.includes("0008_store_min_max_stock.sql"), "0008_store_min_max_stock.sql");
 add("db:classification index migration", migrationFiles.includes("0009_classification_indexes.sql"), "0009_classification_indexes.sql");
+add("db:count session audit migration", migrationFiles.includes("0010_count_sessions.sql"), "0010_count_sessions.sql");
 add(
   "db:phase one relational index migration",
   migrationFiles.includes("0007_phase_one_relational_indexes.sql"),
@@ -152,6 +153,8 @@ if (databaseUrl) {
         "warehouse_transfers_account_warehouse_item_created_idx",
         "warehouse_transfers_account_store_item_created_idx",
         "warehouse_items_account_warehouse_category_name_idx",
+        "count_sessions_account_status_started_idx",
+        "count_session_events_account_session_created_idx",
       ];
       const indexes = await client.query(
         `

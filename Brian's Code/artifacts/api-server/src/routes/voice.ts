@@ -4,7 +4,14 @@ import { z } from "zod";
 import { and, eq, inArray } from "drizzle-orm";
 import { ensureCompatibleFormat, speechToText, textToSpeech } from "@workspace/integrations-openai-ai-server/audio";
 import { openai } from "@workspace/integrations-openai-ai-server";
-import { db, itemsTable, type ItemRow } from "@workspace/db";
+import {
+  countSessionEventsTable,
+  countSessionsTable,
+  db,
+  itemsTable,
+  locationsTable,
+  type ItemRow,
+} from "@workspace/db";
 import { logger } from "../lib/logger";
 import {
   canAccessLocation,
@@ -68,6 +75,180 @@ function voiceErrorDetails(err: unknown) {
   if (process.env.NODE_ENV === "production") return undefined;
   return getErrorMessage(err);
 }
+
+const StartSessionSchema = z.object({
+  locationId: z.number().int().positive().nullable().optional(),
+  locationName: z.string().trim().min(1).max(120).nullable().optional(),
+  mode: z.string().trim().min(1).max(40),
+  itemCount: z.number().int().min(0).max(100000).default(0),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+});
+
+const SessionEventSchema = z.object({
+  eventType: z.string().trim().min(1).max(80),
+  itemId: z.number().int().positive().nullable().optional(),
+  itemName: z.string().trim().max(200).nullable().optional(),
+  action: z.string().trim().max(80).nullable().optional(),
+  status: z.string().trim().max(80).nullable().optional(),
+  expectedQuantity: z.number().int().min(0).nullable().optional(),
+  countedQuantity: z.number().int().min(0).nullable().optional(),
+  reason: z.string().trim().max(200).nullable().optional(),
+  transcript: z.string().trim().max(1000).nullable().optional(),
+  confidence: z.number().int().min(0).max(100).nullable().optional(),
+  message: z.string().trim().max(1000).nullable().optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+});
+
+const CompleteSessionSchema = z.object({
+  status: z.enum(["completed", "paused", "cancelled", "failed"]).default("completed"),
+  verifiedCount: z.number().int().min(0).default(0),
+  updatedCount: z.number().int().min(0).default(0),
+  skippedCount: z.number().int().min(0).default(0),
+  noResponseCount: z.number().int().min(0).default(0),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+});
+
+async function canUseLocationForSession(req: Request, locationId?: number | null, locationName?: string | null) {
+  if (locationId) {
+    const [location] = await db
+      .select()
+      .from(locationsTable)
+      .where(and(eq(locationsTable.accountId, req.account!.id), eq(locationsTable.id, locationId)))
+      .limit(1);
+    if (!location || location.status !== "active") return false;
+    if (canViewAllLocations(req)) return true;
+    if ((req.allowedLocationIds ?? []).includes(location.id)) return true;
+    return canAccessLocation(req, location.name);
+  }
+
+  if (!locationName) return true;
+  if (canViewAllLocations(req)) return true;
+  return canAccessLocation(req, locationName);
+}
+
+async function findAccountSession(req: Request, sessionId: number) {
+  const [session] = await db
+    .select()
+    .from(countSessionsTable)
+    .where(and(eq(countSessionsTable.accountId, req.account!.id), eq(countSessionsTable.id, sessionId)))
+    .limit(1);
+  return session ?? null;
+}
+
+router.post("/voice/sessions", async (req: Request, res: Response) => {
+  const parsed = StartSessionSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid request", details: parsed.error.issues });
+    return;
+  }
+
+  const { locationId, locationName, mode, itemCount, metadata } = parsed.data;
+  if (!(await canUseLocationForSession(req, locationId, locationName))) {
+    res.status(403).json({ error: "Permission denied for this location" });
+    return;
+  }
+
+  const [session] = await db
+    .insert(countSessionsTable)
+    .values({
+      accountId: req.account!.id,
+      userId: req.authUser?.id ?? null,
+      locationId: locationId ?? null,
+      locationName: locationName ?? null,
+      mode,
+      itemCount,
+      metadata: metadata ?? {},
+    })
+    .returning();
+
+  logger.info({ requestId: req.id, sessionId: session?.id, mode, itemCount }, "Voice count session started");
+  res.status(201).json({ id: session!.id, status: session!.status });
+});
+
+router.post("/voice/sessions/:id/events", async (req: Request, res: Response) => {
+  const sessionId = Number(req.params.id);
+  if (!Number.isInteger(sessionId) || sessionId <= 0) {
+    res.status(400).json({ error: "Invalid session id" });
+    return;
+  }
+
+  const parsed = SessionEventSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid request", details: parsed.error.issues });
+    return;
+  }
+
+  const session = await findAccountSession(req, sessionId);
+  if (!session) {
+    res.status(404).json({ error: "Voice count session not found" });
+    return;
+  }
+
+  const event = parsed.data;
+  const [row] = await db
+    .insert(countSessionEventsTable)
+    .values({
+      accountId: req.account!.id,
+      sessionId,
+      userId: req.authUser?.id ?? null,
+      locationId: session.locationId,
+      itemId: event.itemId ?? null,
+      itemName: event.itemName ?? null,
+      eventType: event.eventType,
+      action: event.action ?? null,
+      status: event.status ?? null,
+      expectedQuantity: event.expectedQuantity ?? null,
+      countedQuantity: event.countedQuantity ?? null,
+      reason: event.reason ?? null,
+      transcript: event.transcript ?? null,
+      confidence: event.confidence ?? null,
+      message: event.message ?? null,
+      metadata: event.metadata ?? {},
+    })
+    .returning({ id: countSessionEventsTable.id });
+
+  logger.info({ requestId: req.id, sessionId, eventType: event.eventType }, "Voice count session event recorded");
+  res.status(201).json({ id: row!.id });
+});
+
+router.patch("/voice/sessions/:id", async (req: Request, res: Response) => {
+  const sessionId = Number(req.params.id);
+  if (!Number.isInteger(sessionId) || sessionId <= 0) {
+    res.status(400).json({ error: "Invalid session id" });
+    return;
+  }
+
+  const parsed = CompleteSessionSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid request", details: parsed.error.issues });
+    return;
+  }
+
+  const session = await findAccountSession(req, sessionId);
+  if (!session) {
+    res.status(404).json({ error: "Voice count session not found" });
+    return;
+  }
+
+  const { status, verifiedCount, updatedCount, skippedCount, noResponseCount, metadata } = parsed.data;
+  const [updated] = await db
+    .update(countSessionsTable)
+    .set({
+      status,
+      verifiedCount,
+      updatedCount,
+      skippedCount,
+      noResponseCount,
+      metadata: metadata ?? session.metadata,
+      completedAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(and(eq(countSessionsTable.accountId, req.account!.id), eq(countSessionsTable.id, sessionId)))
+    .returning({ id: countSessionsTable.id, status: countSessionsTable.status });
+
+  logger.info({ requestId: req.id, sessionId, status }, "Voice count session completed");
+  res.json(updated);
+});
 
 /* ── POST /voice/transcribe ─────────────────────────────────────────
    Accepts audio file upload, returns transcript.

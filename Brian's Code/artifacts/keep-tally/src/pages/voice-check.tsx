@@ -63,6 +63,7 @@ type CountMode = "all" | "low-stock" | "category" | "custom";
 type ResultStatus = "verified" | "updated-lower" | "updated-higher" | "skipped" | "no-response";
 type ConfirmationChoice = "yes" | "no";
 type VoiceDebugEntry = { at: string; step: string; detail?: string };
+type VoiceSessionStatus = "completed" | "paused" | "cancelled" | "failed";
 
 interface SessionResult {
   item: Item;
@@ -79,6 +80,20 @@ interface AIStatus {
   realtimeEnabled: boolean;
   voiceFallbackEnabled: boolean;
 }
+
+type VoiceAuditEventInput = {
+  eventType: string;
+  item?: Item | null;
+  action?: string | null;
+  status?: string | null;
+  expectedQuantity?: number | null;
+  countedQuantity?: number | null;
+  reason?: string | null;
+  transcript?: string | null;
+  confidence?: number | null;
+  message?: string | null;
+  metadata?: Record<string, unknown>;
+};
 
 /* ── Helpers ─────────────────────────────────────────────────────────── */
 
@@ -427,6 +442,7 @@ export default function VoiceCheck() {
   const [pendingCounted, setPendingCounted] = useState<number | null>(null);
   const [micPrecheck, setMicPrecheck] = useState<MicrophonePrecheckResult | null>(null);
   const [micChecking, setMicChecking] = useState(false);
+  const [activeVoiceSessionId, setActiveVoiceSessionId] = useState<number | null>(null);
 
   // Custom (AI voice) mode state
   const [customMatchedItem, setCustomMatchedItem] = useState<Item | null>(null);
@@ -435,6 +451,7 @@ export default function VoiceCheck() {
   const controlRef = useRef({ shouldStop: false, shouldSkip: false, shouldRepeat: false, shouldPause: false });
   const currentIndexRef = useRef(0);
   const sessionResultsRef = useRef<SessionResult[]>([]);
+  const activeVoiceSessionIdRef = useRef<number | null>(null);
   const isRunningRef = useRef(false);
   const lastVoiceLevelLogAtRef = useRef(0);
   const confirmationResolverRef = useRef<((choice: ConfirmationChoice) => void) | null>(null);
@@ -542,6 +559,97 @@ export default function VoiceCheck() {
     setVoiceDebugEntries((current) => [entry, ...current].slice(0, 12));
   }, []);
 
+  const startVoiceAuditSession = useCallback(async (mode: CountMode, itemCount: number): Promise<number | null> => {
+    try {
+      const location = locationOptions.find((option) => option.name === sessionLocation);
+      const res = await fetch(`${BASE}/api/voice/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          locationId: location?.id ?? null,
+          locationName: sessionLocation,
+          mode,
+          itemCount,
+          metadata: {
+            voiceTtsEnabled: VOICE_COUNT_TTS_ENABLED,
+            browserRecordingMimeType: voiceSupport.recordingMimeType || "browser-default",
+          },
+        }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const data = (await res.json()) as { id: number };
+      activeVoiceSessionIdRef.current = data.id;
+      setActiveVoiceSessionId(data.id);
+      logVoiceStep("audit.session.started", { id: data.id, mode, itemCount });
+      return data.id;
+    } catch (err) {
+      logVoiceStep("audit.session.failed", { error: err instanceof Error ? err.message : String(err) });
+      return null;
+    }
+  }, [locationOptions, logVoiceStep, sessionLocation, voiceSupport.recordingMimeType]);
+
+  const logVoiceAuditEvent = useCallback(async (event: VoiceAuditEventInput) => {
+    const sessionId = activeVoiceSessionIdRef.current;
+    if (!sessionId) return;
+
+    try {
+      const res = await fetch(`${BASE}/api/voice/sessions/${sessionId}/events`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          eventType: event.eventType,
+          itemId: event.item?.id ?? null,
+          itemName: event.item?.name ?? null,
+          action: event.action ?? null,
+          status: event.status ?? null,
+          expectedQuantity: event.expectedQuantity ?? null,
+          countedQuantity: event.countedQuantity ?? null,
+          reason: event.reason ?? null,
+          transcript: event.transcript ?? null,
+          confidence: event.confidence ?? null,
+          message: event.message ?? null,
+          metadata: event.metadata ?? {},
+        }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+    } catch (err) {
+      logVoiceStep("audit.event.failed", {
+        eventType: event.eventType,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }, [logVoiceStep]);
+
+  const completeVoiceAuditSession = useCallback(async (status: VoiceSessionStatus, metadata: Record<string, unknown> = {}) => {
+    const sessionId = activeVoiceSessionIdRef.current;
+    if (!sessionId) return;
+
+    const results = sessionResultsRef.current;
+    try {
+      await fetch(`${BASE}/api/voice/sessions/${sessionId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          status,
+          verifiedCount: results.filter((result) => result.status === "verified").length,
+          updatedCount: results.filter((result) => result.status === "updated-higher" || result.status === "updated-lower").length,
+          skippedCount: results.filter((result) => result.status === "skipped").length,
+          noResponseCount: results.filter((result) => result.status === "no-response").length,
+          metadata,
+        }),
+      });
+      logVoiceStep("audit.session.completed", { id: sessionId, status });
+    } catch (err) {
+      logVoiceStep("audit.session.complete-failed", { error: err instanceof Error ? err.message : String(err) });
+    } finally {
+      activeVoiceSessionIdRef.current = null;
+      setActiveVoiceSessionId(null);
+    }
+  }, [logVoiceStep]);
+
   /* ── Voice helpers ── */
   const safeSpeak = useCallback(async (text: string, opts: { audible?: boolean } = {}): Promise<boolean> => {
     if (controlRef.current.shouldStop || controlRef.current.shouldPause) return false;
@@ -601,6 +709,11 @@ export default function VoiceCheck() {
         });
       }
       setLastHeard("");
+      await logVoiceAuditEvent({
+        eventType: "transcription_failed",
+        status: result.reason,
+        message,
+      });
       if (result.reason !== "silent") {
         controlRef.current.shouldPause = true;
         setPhase("paused");
@@ -613,8 +726,13 @@ export default function VoiceCheck() {
     setLastHeard(transcript || "");
     setStatusMessage(transcript ? `Heard "${transcript}".` : "No speech was transcribed.");
     logVoiceStep("transcribe.success", { transcript });
+    await logVoiceAuditEvent({
+      eventType: "transcript_received",
+      status: transcript ? "transcribed" : "empty",
+      transcript,
+    });
     return transcript;
-  }, [listenDetailed, logVoiceStep]);
+  }, [listenDetailed, logVoiceAuditEvent, logVoiceStep]);
 
   const runMicPrecheck = useCallback(async () => {
     setMicChecking(true);
@@ -718,6 +836,7 @@ export default function VoiceCheck() {
     isRunningRef.current = true;
     controlRef.current = { shouldStop: false, shouldSkip: false, shouldRepeat: false, shouldPause: false };
     await acquireWakeLock();
+    await startVoiceAuditSession(countMode ?? "all", queue.length);
 
     for (let i = startIndex; i < queue.length; i++) {
       if (controlRef.current.shouldStop || controlRef.current.shouldPause) break;
@@ -754,6 +873,12 @@ export default function VoiceCheck() {
         });
 
         if (aiQty.action === "skip") {
+          await logVoiceAuditEvent({
+            eventType: "item_skipped",
+            item,
+            action: "skip",
+            expectedQuantity: item.quantity,
+          });
           addResult({ item, expected: item.quantity, counted: null, diff: null, status: "skipped", adjustmentType: null });
           break itemLoop;
         }
@@ -763,6 +888,13 @@ export default function VoiceCheck() {
         }
         if (aiQty.action === "unknown") {
           await safeSpeak("Didn't catch that. Skipping.");
+          await logVoiceAuditEvent({
+            eventType: "item_no_response",
+            item,
+            action: "unknown",
+            expectedQuantity: item.quantity,
+            transcript,
+          });
           addResult({ item, expected: item.quantity, counted: null, diff: null, status: "no-response", adjustmentType: null });
           break itemLoop;
         }
@@ -774,12 +906,28 @@ export default function VoiceCheck() {
           try {
             await logVerification(item);
           } catch {
+            await logVoiceAuditEvent({
+              eventType: "save_failed",
+              item,
+              action: "verify",
+              expectedQuantity: item.quantity,
+              countedQuantity: item.quantity,
+            });
             await notifySaveFailed();
             addResult({ item, expected: item.quantity, counted: null, diff: null, status: "no-response", adjustmentType: null });
             break itemLoop;
           }
           await safeSpeak("Got it.");
           addResult({ item, expected: item.quantity, counted: item.quantity, diff: 0, status: "verified", adjustmentType: null });
+          await logVoiceAuditEvent({
+            eventType: "save_succeeded",
+            item,
+            action: "verify",
+            status: "verified",
+            expectedQuantity: item.quantity,
+            countedQuantity: item.quantity,
+            transcript,
+          });
           break itemLoop;
         }
 
@@ -791,11 +939,27 @@ export default function VoiceCheck() {
           try {
             await saveAdjustment(item.id, counted, "Adjustment", false);
           } catch {
+            await logVoiceAuditEvent({
+              eventType: "save_failed",
+              item,
+              action: "adjust",
+              expectedQuantity: item.quantity,
+              countedQuantity: counted,
+            });
             await notifySaveFailed();
             addResult({ item, expected: item.quantity, counted: null, diff: null, status: "no-response", adjustmentType: null });
             break itemLoop;
           }
           addResult({ item, expected: item.quantity, counted, diff: counted - item.quantity, status: "updated-higher", adjustmentType: "Adjustment" });
+          await logVoiceAuditEvent({
+            eventType: "save_succeeded",
+            item,
+            action: "adjust",
+            status: "updated-higher",
+            expectedQuantity: item.quantity,
+            countedQuantity: counted,
+            transcript,
+          });
           await safeSpeak(`Got ${counted}. Saved.`);
           break itemLoop;
         }
@@ -824,11 +988,29 @@ export default function VoiceCheck() {
             await saveAdjustment(item.id, counted, reason, false);
           } catch {
             setPendingCounted(null);
+            await logVoiceAuditEvent({
+              eventType: "save_failed",
+              item,
+              action: "adjust",
+              expectedQuantity: item.quantity,
+              countedQuantity: counted,
+              reason,
+            });
             await notifySaveFailed();
             addResult({ item, expected: item.quantity, counted: null, diff: null, status: "no-response", adjustmentType: null });
             break itemLoop;
           }
           addResult({ item, expected: item.quantity, counted, diff: counted - item.quantity, status: "updated-lower", adjustmentType: reason });
+          await logVoiceAuditEvent({
+            eventType: "save_succeeded",
+            item,
+            action: "adjust",
+            status: "updated-lower",
+            expectedQuantity: item.quantity,
+            countedQuantity: counted,
+            reason,
+            transcript,
+          });
           vibrate([50, 50, 100]);
           await safeSpeak(`Saved as ${reason}.`);
           setPendingCounted(null);
@@ -841,14 +1023,17 @@ export default function VoiceCheck() {
     releaseWakeLock();
 
     if (controlRef.current.shouldStop) {
+      await completeVoiceAuditSession("cancelled", { reason: "operator_stop" });
       setPhase("complete");
     } else if (controlRef.current.shouldPause) {
+      await completeVoiceAuditSession("paused");
       setPhase("paused");
     } else {
       await safeSpeak("Count mode complete.");
+      await completeVoiceAuditSession("completed");
       setPhase("complete");
     }
-  }, [safeSpeak, safeListen, addResult, acquireWakeLock, releaseWakeLock, items, notifySaveFailed, confirmLargeChange]);
+  }, [safeSpeak, safeListen, addResult, acquireWakeLock, releaseWakeLock, items, notifySaveFailed, confirmLargeChange, countMode, startVoiceAuditSession, logVoiceAuditEvent, completeVoiceAuditSession]);
 
   /* ── AI VOICE session (Custom mode) ── */
   const runCustomSession = useCallback(async (sessionItems: Item[]) => {
@@ -864,6 +1049,7 @@ export default function VoiceCheck() {
       setStatusMessage("Starting AI voice listener...");
       setPhase("custom-listening");
       await acquireWakeLock();
+      await startVoiceAuditSession("custom", sessionItems.length);
 
       setStatusMessage("Ready. Say an item name and count.");
 
@@ -891,6 +1077,7 @@ export default function VoiceCheck() {
         // treat it as an end-of-utterance marker and still process the count.
         if (isCompletionOnlyCommand(transcript)) {
           logVoiceStep("custom.stop-command", { transcript });
+          await logVoiceAuditEvent({ eventType: "session_stop_command", action: "done", transcript });
           break;
         }
 
@@ -911,6 +1098,13 @@ export default function VoiceCheck() {
           const message = `I heard "${commandTranscript}", but that could be ${candidates}. Please say a more specific item name.`;
           setVoiceNotice(message);
           setStatusMessage(message);
+          await logVoiceAuditEvent({
+            eventType: "item_match_ambiguous",
+            action: "clarify",
+            transcript: commandTranscript,
+            message,
+            metadata: { candidates },
+          });
           await safeSpeak(message);
           continue;
         }
@@ -943,6 +1137,12 @@ export default function VoiceCheck() {
           const message = `I heard "${commandTranscript}", but I could not match that to an item and count in ${sessionLocation ?? "this location"}. Try the full item name plus a number.`;
           setVoiceNotice(message);
           setStatusMessage(message);
+          await logVoiceAuditEvent({
+            eventType: "item_match_failed",
+            action: aiCustom.action,
+            transcript: commandTranscript,
+            message,
+          });
           await safeSpeak(message);
           continue;
         }
@@ -953,21 +1153,53 @@ export default function VoiceCheck() {
           const message = `I matched ${aiCustom.itemName}, but it is not available in ${sessionLocation ?? "this location"}. Try another item name.`;
           setVoiceNotice(message);
           setStatusMessage(message);
+          await logVoiceAuditEvent({
+            eventType: "item_not_in_location",
+            action: "reject",
+            countedQuantity: aiCustom.quantity,
+            transcript: commandTranscript,
+            message,
+            metadata: { itemName: aiCustom.itemName },
+          });
           await safeSpeak(message);
           continue;
         }
 
         const quantity = aiCustom.quantity;
         logVoiceStep("custom.match.confirmed", { item: item.name, quantity, systemQuantity: item.quantity });
+        await logVoiceAuditEvent({
+          eventType: "item_matched",
+          item,
+          action: "match",
+          expectedQuantity: item.quantity,
+          countedQuantity: quantity,
+          transcript: commandTranscript,
+        });
         setCustomMatchedItem(item);
         setCustomSpokenQty(quantity);
         setStatusMessage(`Matched ${item.name}, count ${quantity}. Waiting for confirmation.`);
 
         if (!(await confirmSpokenCount(item, quantity))) {
           logVoiceStep("custom.save.skipped-after-confirmation", { item: item.name, quantity });
+          await logVoiceAuditEvent({
+            eventType: "confirmation_rejected",
+            item,
+            action: "skip",
+            expectedQuantity: item.quantity,
+            countedQuantity: quantity,
+            transcript: commandTranscript,
+          });
           addResult({ item, expected: item.quantity, counted: null, diff: null, status: "skipped", adjustmentType: null });
           continue;
         }
+        await logVoiceAuditEvent({
+          eventType: "confirmation_accepted",
+          item,
+          action: "confirm",
+          expectedQuantity: item.quantity,
+          countedQuantity: quantity,
+          transcript: commandTranscript,
+        });
 
         setStatusMessage(`Saving ${item.name}, count ${quantity}...`);
         logVoiceStep("custom.save.start", { item: item.name, quantity, systemQuantity: item.quantity });
@@ -977,6 +1209,13 @@ export default function VoiceCheck() {
             await logVerification(item);
           } catch {
             logVoiceStep("custom.save.failed", { item: item.name, quantity, operation: "verify" });
+            await logVoiceAuditEvent({
+              eventType: "save_failed",
+              item,
+              action: "verify",
+              expectedQuantity: item.quantity,
+              countedQuantity: quantity,
+            });
             await notifySaveFailed();
             addResult({ item, expected: item.quantity, counted: null, diff: null, status: "no-response", adjustmentType: null });
             continue;
@@ -984,6 +1223,14 @@ export default function VoiceCheck() {
           await safeSpeak("OK");
           addResult({ item, expected: item.quantity, counted: quantity, diff: 0, status: "verified", adjustmentType: null });
           logVoiceStep("custom.save.verified", { item: item.name, quantity });
+          await logVoiceAuditEvent({
+            eventType: "save_succeeded",
+            item,
+            action: "verify",
+            status: "verified",
+            expectedQuantity: item.quantity,
+            countedQuantity: quantity,
+          });
           await notifyCountSaved(`${item.name}: count ${quantity} verified and written to inventory history.`);
 
         } else if (quantity > item.quantity) {
@@ -996,12 +1243,28 @@ export default function VoiceCheck() {
             await saveAdjustment(item.id, quantity, "Adjustment", false);
           } catch {
             logVoiceStep("custom.save.failed", { item: item.name, quantity, operation: "adjust-higher" });
+            await logVoiceAuditEvent({
+              eventType: "save_failed",
+              item,
+              action: "adjust",
+              expectedQuantity: item.quantity,
+              countedQuantity: quantity,
+            });
             await notifySaveFailed();
             addResult({ item, expected: item.quantity, counted: null, diff: null, status: "no-response", adjustmentType: null });
             continue;
           }
           addResult({ item, expected: item.quantity, counted: quantity, diff: quantity - item.quantity, status: "updated-higher", adjustmentType: "Adjustment" });
           logVoiceStep("custom.save.updated-higher", { item: item.name, quantity });
+          await logVoiceAuditEvent({
+            eventType: "save_succeeded",
+            item,
+            action: "adjust",
+            status: "updated-higher",
+            expectedQuantity: item.quantity,
+            countedQuantity: quantity,
+            reason: "Adjustment",
+          });
           await notifyCountSaved(`${item.name}: count updated to ${quantity} and written to inventory history.`);
 
         } else {
@@ -1031,12 +1294,29 @@ export default function VoiceCheck() {
           } catch {
             logVoiceStep("custom.save.failed", { item: item.name, quantity, reason, operation: "adjust-lower" });
             setPendingCounted(null);
+            await logVoiceAuditEvent({
+              eventType: "save_failed",
+              item,
+              action: "adjust",
+              expectedQuantity: item.quantity,
+              countedQuantity: quantity,
+              reason,
+            });
             await notifySaveFailed();
             addResult({ item, expected: item.quantity, counted: null, diff: null, status: "no-response", adjustmentType: null });
             continue;
           }
           addResult({ item, expected: item.quantity, counted: quantity, diff: quantity - item.quantity, status: "updated-lower", adjustmentType: reason });
           logVoiceStep("custom.save.updated-lower", { item: item.name, quantity, reason });
+          await logVoiceAuditEvent({
+            eventType: "save_succeeded",
+            item,
+            action: "adjust",
+            status: "updated-lower",
+            expectedQuantity: item.quantity,
+            countedQuantity: quantity,
+            reason,
+          });
           await notifyCountSaved(`${item.name}: count updated to ${quantity} with reason ${reason} and written to inventory history.`);
           vibrate([50, 50, 100]);
           setPendingCounted(null);
@@ -1046,6 +1326,7 @@ export default function VoiceCheck() {
       const message = err instanceof Error ? err.message : "Unknown voice workflow error";
       logVoiceStep("custom.error", { message });
       const notice = `AI voice count could not start: ${message}`;
+      await logVoiceAuditEvent({ eventType: "session_failed", status: "failed", message });
       setVoiceNotice(notice);
       setStatusMessage(notice);
       toast({
@@ -1060,12 +1341,14 @@ export default function VoiceCheck() {
     releaseWakeLock();
 
     if (controlRef.current.shouldPause) {
+      await completeVoiceAuditSession("paused");
       setPhase("paused");
     } else {
       await safeSpeak("Count complete.");
+      await completeVoiceAuditSession(controlRef.current.shouldStop ? "cancelled" : "completed");
       setPhase("complete");
     }
-  }, [safeSpeak, safeListen, addResult, acquireWakeLock, releaseWakeLock, notifySaveFailed, confirmLargeChange, confirmSpokenCount, notifyCountSaved, logVoiceStep, sessionLocation]);
+  }, [safeSpeak, safeListen, addResult, acquireWakeLock, releaseWakeLock, notifySaveFailed, confirmLargeChange, confirmSpokenCount, notifyCountSaved, logVoiceStep, sessionLocation, startVoiceAuditSession, logVoiceAuditEvent, completeVoiceAuditSession]);
 
   /* ── Build queue & start ── */
   const buildQueue = useCallback((): Item[] => {
@@ -1314,7 +1597,7 @@ export default function VoiceCheck() {
             <div className="rounded-xl border border-border bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground">
               <div className="mb-1 flex items-center justify-between">
                 <span className="font-bold uppercase tracking-wide text-foreground">Voice diagnostic log</span>
-                <span>{voiceDebugEntries.length} events</span>
+                <span>{activeVoiceSessionId ? `Session ${activeVoiceSessionId}` : `${voiceDebugEntries.length} events`}</span>
               </div>
               <div className="max-h-28 space-y-1 overflow-auto">
                 {voiceDebugEntries.slice(0, 6).map((entry, index) => (
@@ -1776,7 +2059,7 @@ export default function VoiceCheck() {
           <div className="rounded-xl border border-border bg-muted/30 px-4 py-3 text-xs text-muted-foreground">
             <div className="mb-2 flex items-center justify-between">
               <span className="font-bold uppercase tracking-wide text-foreground">Voice diagnostic log</span>
-              <span>{voiceDebugEntries.length} events</span>
+              <span>{activeVoiceSessionId ? `Session ${activeVoiceSessionId}` : `${voiceDebugEntries.length} events`}</span>
             </div>
             <div className="space-y-1">
               {voiceDebugEntries.slice(0, 6).map((entry, index) => (
