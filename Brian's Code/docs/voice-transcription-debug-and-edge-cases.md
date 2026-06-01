@@ -89,14 +89,15 @@ Expected:
 Use these in `.env.vps-test` for a less robotic voice:
 
 ```bash
-AI_TTS_VOICE=shimmer
-AI_TTS_INSTRUCTIONS=Use a warm, polite, natural human voice. Keep prompts brief, calm, and easy to understand for an inventory operator.
+AI_TTS_VOICE=coral
+AI_TTS_INSTRUCTIONS=Use a bright, joyful, friendly female-presenting voice. Sound natural and encouraging, with warm energy. Keep prompts brief, clear, and easy to understand for an inventory operator.
 VITE_VOICE_COUNT_TTS_ENABLED=false
 VITE_VOICE_COUNT_CONFIRMATION_AUDIO_ENABLED=true
 ```
 
 Recommended voice options:
 
+- `coral`: cheerful, bright, and friendly.
 - `shimmer`: friendly, polite, lighter voice.
 - `nova`: clear, neutral, professional voice.
 - `onyx`: deeper male voice.
