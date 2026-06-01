@@ -141,6 +141,17 @@ function parseConfirmation(transcript: string): "yes" | "no" | "unknown" {
   return "unknown";
 }
 
+const COMPLETION_COMMAND_RE = /\b(done|stop|finish|finished|complete|completed|that'?s all|all done|end|exit|quit)\b/gi;
+
+function stripCompletionCommands(transcript: string): string {
+  return transcript.replace(COMPLETION_COMMAND_RE, " ").replace(/\s+/g, " ").trim();
+}
+
+function isCompletionOnlyCommand(transcript: string): boolean {
+  const stripped = stripCompletionCommands(transcript);
+  return stripped.length === 0 && /\b(done|stop|finish|finished|complete|completed|that'?s all|all done|end|exit|quit)\b/i.test(transcript);
+}
+
 /* ── Item name + quantity parser for voice-driven custom mode ─────── */
 
 type ItemMatch =
@@ -872,22 +883,28 @@ export default function VoiceCheck() {
           continue;
         }
 
-        // Stop commands
-        if (/\b(done|stop|finish|exit|end|quit)\b/.test(transcript)) {
+        // A completion word by itself ends the session. If it follows an item/count,
+        // treat it as an end-of-utterance marker and still process the count.
+        if (isCompletionOnlyCommand(transcript)) {
           logVoiceStep("custom.stop-command", { transcript });
           break;
         }
 
+        const commandTranscript = stripCompletionCommands(transcript);
         setStatusMessage(`Heard "${transcript}". Matching item...`);
-        logVoiceStep("custom.match.start", { transcript, itemCount: sessionItems.length });
+        logVoiceStep("custom.match.start", {
+          transcript,
+          commandTranscript,
+          itemCount: sessionItems.length,
+        });
 
         // Try deterministic database-backed matching first; use AI only as a fallback.
-        const localParse = parseVoiceCommand(transcript, sessionItems);
+        const localParse = parseVoiceCommand(commandTranscript, sessionItems);
         let aiCustom: GPTParseResult = { action: "unknown" };
         if (localParse && "ambiguous" in localParse) {
           const candidates = localParse.ambiguous.map((item) => item.name).join(", ");
-          logVoiceStep("custom.match.ambiguous", { transcript, candidates });
-          const message = `I heard "${transcript}", but that could be ${candidates}. Please say a more specific item name.`;
+          logVoiceStep("custom.match.ambiguous", { transcript, commandTranscript, candidates });
+          const message = `I heard "${commandTranscript}", but that could be ${candidates}. Please say a more specific item name.`;
           setVoiceNotice(message);
           setStatusMessage(message);
           await safeSpeak(message);
@@ -896,6 +913,7 @@ export default function VoiceCheck() {
         if (localParse && "item" in localParse) {
           logVoiceStep("custom.match.local", {
             transcript,
+            commandTranscript,
             item: localParse.item.name,
             quantity: localParse.quantity,
           });
@@ -906,8 +924,8 @@ export default function VoiceCheck() {
             quantity: localParse.quantity,
           };
         } else {
-          logVoiceStep("custom.match.ai-request", { transcript });
-          aiCustom = await parseWithAI(transcript, "custom", voiceCandidateItems(transcript, sessionItems));
+          logVoiceStep("custom.match.ai-request", { transcript, commandTranscript });
+          aiCustom = await parseWithAI(commandTranscript, "custom", voiceCandidateItems(commandTranscript, sessionItems));
           logVoiceStep("custom.match.ai-response", aiCustom);
         }
 
@@ -917,8 +935,8 @@ export default function VoiceCheck() {
         }
 
         if (aiCustom.action !== "custom") {
-          logVoiceStep("custom.match.failed", { transcript, action: aiCustom.action });
-          const message = `I heard "${transcript}", but I could not match that to an item and count in ${sessionLocation ?? "this location"}. Try the full item name plus a number.`;
+          logVoiceStep("custom.match.failed", { transcript, commandTranscript, action: aiCustom.action });
+          const message = `I heard "${commandTranscript}", but I could not match that to an item and count in ${sessionLocation ?? "this location"}. Try the full item name plus a number.`;
           setVoiceNotice(message);
           setStatusMessage(message);
           await safeSpeak(message);

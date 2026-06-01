@@ -3,7 +3,7 @@ import { useRef, useCallback, useEffect } from "react";
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const SPEAK_TIMEOUT_MS = 12000;
 const TRANSCRIBE_TIMEOUT_MS = 18000;
-const END_OF_UTTERANCE_SILENCE_MS = 7000;
+const END_OF_UTTERANCE_SILENCE_MS = 1800;
 
 export type VoiceSupport = {
   hasSpeechRecognition: boolean;
