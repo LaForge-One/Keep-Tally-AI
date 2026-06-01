@@ -108,9 +108,9 @@ const WORD_MAP: Record<string, number> = {
 
 function wordToNumber(text: string): number | null {
   const words = text.replace(/-/g, " ").split(/\s+/);
-  for (const w of words) {
+  for (let idx = 0; idx < words.length; idx++) {
+    const w = words[idx]!;
     if (WORD_MAP[w] !== undefined) {
-      const idx = words.indexOf(w);
       const next = words[idx + 1];
       if (next && WORD_MAP[next] !== undefined && WORD_MAP[w]! >= 20 && WORD_MAP[next]! < 10) {
         return WORD_MAP[w]! + WORD_MAP[next]!;
@@ -167,22 +167,44 @@ type ItemMatch =
   | { status: "ambiguous"; candidates: Item[] }
   | { status: "none" };
 
+type IndexedVoiceItem = {
+  item: Item;
+  normalizedName: string;
+  words: string[];
+};
+
+const voiceItemIndexCache = new WeakMap<readonly Item[], IndexedVoiceItem[]>();
+
+function getVoiceItemIndex(items: readonly Item[]): IndexedVoiceItem[] {
+  const cached = voiceItemIndexCache.get(items);
+  if (cached) return cached;
+
+  const indexed = items.map((item) => {
+    const normalizedName = item.name.toLowerCase();
+    return {
+      item,
+      normalizedName,
+      words: normalizedName.split(/\s+/).filter((w) => w.length > 1),
+    };
+  });
+  voiceItemIndexCache.set(items, indexed);
+  return indexed;
+}
+
 function rankItemMatches(query: string, items: Item[]): Array<{ item: Item; score: number }> {
   const q = query.toLowerCase().trim();
   if (!q) return [];
   const queryWords = q.split(/\s+/).filter((w) => w.length > 1);
   const ranked: Array<{ item: Item; score: number }> = [];
 
-  for (const item of items) {
-    const name = item.name.toLowerCase();
+  for (const { item, normalizedName, words } of getVoiceItemIndex(items)) {
     let score = 0;
 
-    if (name.includes(q) || q.includes(name)) {
-      score = (Math.min(name.length, q.length) / Math.max(name.length, q.length)) * 100;
+    if (normalizedName.includes(q) || q.includes(normalizedName)) {
+      score = (Math.min(normalizedName.length, q.length) / Math.max(normalizedName.length, q.length)) * 100;
     } else {
-      const itemWords = name.split(/\s+/).filter((w) => w.length > 1);
       const matchCount = queryWords.filter((qw) =>
-        itemWords.some((iw) => iw.includes(qw) || qw.includes(iw))
+        words.some((iw) => iw.includes(qw) || qw.includes(iw))
       ).length;
       score = queryWords.length > 0 ? (matchCount / queryWords.length) * 100 : 0;
     }
@@ -512,10 +534,24 @@ export default function VoiceCheck() {
     };
   }, [selectedLocation]);
 
-  const categories = useMemo(() => {
-    const cats = new Set(items.map((it) => it.category).filter(Boolean));
-    return Array.from(cats).sort();
+  const itemStats = useMemo(() => {
+    const categoryCounts = new Map<string, number>();
+    let lowStockCount = 0;
+
+    for (const item of items) {
+      if (item.quantity < item.minQuantity) lowStockCount += 1;
+      if (item.category) {
+        categoryCounts.set(item.category, (categoryCounts.get(item.category) ?? 0) + 1);
+      }
+    }
+
+    return {
+      categories: Array.from(categoryCounts.keys()).sort(),
+      categoryCounts,
+      lowStockCount,
+    };
   }, [items]);
+  const categories = itemStats.categories;
 
   /* ── Wake Lock ── */
   const acquireWakeLock = useCallback(async () => {
@@ -1526,9 +1562,22 @@ export default function VoiceCheck() {
   const isReasonPhase = phase === "reason-speaking" || phase === "reason-listening";
   const currentItem = queuedItems[currentIndex];
 
-  const summaryVerified = sessionResults.filter((r) => r.status === "verified").length;
-  const summaryUpdated = sessionResults.filter((r) => r.status === "updated-lower" || r.status === "updated-higher").length;
-  const summarySkipped = sessionResults.filter((r) => r.status === "skipped" || r.status === "no-response").length;
+  const sessionSummary = useMemo(() => {
+    let verified = 0;
+    let updated = 0;
+    let skipped = 0;
+
+    for (const result of sessionResults) {
+      if (result.status === "verified") verified += 1;
+      else if (result.status === "updated-lower" || result.status === "updated-higher") updated += 1;
+      else if (result.status === "skipped" || result.status === "no-response") skipped += 1;
+    }
+
+    return { verified, updated, skipped };
+  }, [sessionResults]);
+  const summaryVerified = sessionSummary.verified;
+  const summaryUpdated = sessionSummary.updated;
+  const summarySkipped = sessionSummary.skipped;
 
   const queueSize = buildQueue().length;
   const voiceCaptureLabel =
@@ -2199,7 +2248,7 @@ export default function VoiceCheck() {
                 <div>
                   <p className="font-bold text-sm">Low Stock</p>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    {items.filter((it) => it.quantity < it.minQuantity).length} below minimum
+                    {itemStats.lowStockCount} below minimum
                   </p>
                 </div>
               </button>
@@ -2252,7 +2301,7 @@ export default function VoiceCheck() {
                   <SelectContent>
                     {categories.map((cat) => (
                       <SelectItem key={cat} value={cat}>
-                        {cat} ({items.filter((it) => it.category === cat).length} items)
+                        {cat} ({itemStats.categoryCounts.get(cat) ?? 0} items)
                       </SelectItem>
                     ))}
                   </SelectContent>
