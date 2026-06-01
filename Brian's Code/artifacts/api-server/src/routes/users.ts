@@ -1,4 +1,4 @@
-import { Router, type NextFunction, type Request, type Response } from "express";
+import { Router, type IRouter, type NextFunction, type Request, type Response } from "express";
 import { z } from "zod";
 import {
   accountMembershipsTable,
@@ -15,7 +15,7 @@ import { and, eq } from "drizzle-orm";
 import { hashPassword } from "../lib/auth-helpers";
 import { requireAccount, requireActiveMembership } from "../middleware/auth";
 
-const router = Router();
+const router: IRouter = Router();
 
 function getParam(req: { params: Record<string, string | string[] | undefined> }, key: string): string | null {
   const value = req.params[key];

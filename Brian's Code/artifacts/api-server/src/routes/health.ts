@@ -16,6 +16,15 @@ function getModelsUrl(baseUrl: string): string {
   return new URL("models", normalizedBaseUrl).toString();
 }
 
+function getModelIds(payload: unknown): string[] {
+  if (typeof payload !== "object" || payload === null || !("data" in payload)) return [];
+  const data = (payload as { data?: unknown }).data;
+  if (!Array.isArray(data)) return [];
+  return data
+    .map((model) => (typeof model === "object" && model !== null && "id" in model ? model.id : undefined))
+    .filter((id): id is string => typeof id === "string");
+}
+
 router.get("/healthz", (_req, res) => {
   const data = HealthCheckResponse.parse({ status: "ok" });
   res.json(data);
@@ -64,12 +73,8 @@ router.get("/ai/connectivity", async (_req, res) => {
     });
 
     const elapsedMs = Date.now() - startedAt;
-    const payload = await response.json().catch(() => null);
-    const models = Array.isArray(payload?.data)
-      ? payload.data
-          .map((model: { id?: unknown }) => model.id)
-          .filter((id: unknown): id is string => typeof id === "string")
-      : [];
+    const payload: unknown = await response.json().catch(() => null);
+    const models = getModelIds(payload);
 
     res.status(response.ok ? 200 : 502).json({
       ok: response.ok,

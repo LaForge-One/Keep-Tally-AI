@@ -12,7 +12,7 @@
     }
   },
   "scripts": {
-    "typecheck": "tsc -b tsconfig.json --force"
+    "typecheck": "tsc -b tsconfig.json"
   },
   "dependencies": {
     "zod": "catalog:"

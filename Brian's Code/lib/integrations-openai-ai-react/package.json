@@ -3,9 +3,18 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.ts",
-    "./audio": "./src/audio/index.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "workspace": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./audio": {
+      "types": "./dist/audio/index.d.ts",
+      "workspace": "./src/audio/index.ts",
+      "default": "./src/audio/index.ts"
+    }
   },
   "peerDependencies": {
     "react": ">=18"

@@ -11,7 +11,7 @@
     "import-csv": "tsx ./src/import-csv.ts",
     "report:tenant-links": "tsx ./src/report-tenant-links.ts",
     "check:import-fixtures": "tsx ./src/check-import-fixtures.ts",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -b tsconfig.json"
   },
   "dependencies": {
     "@workspace/db": "workspace:*",

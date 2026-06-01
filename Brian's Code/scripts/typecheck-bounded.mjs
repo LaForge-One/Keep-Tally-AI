@@ -1,15 +1,18 @@
 import { spawn } from "node:child_process";
 
-const DEFAULT_TIMEOUT_MS = 180_000;
+const DEFAULT_TIMEOUT_MS = 240_000;
 
 const checks = [
-  ["scripts", ["--filter", "@workspace/scripts", "run", "typecheck"], 90_000],
+  ["libs", ["run", "typecheck:libs"], DEFAULT_TIMEOUT_MS],
+  ["scripts", ["--filter", "@workspace/scripts", "run", "typecheck"], 120_000],
   ["api-server", ["--filter", "@workspace/api-server", "run", "typecheck"], DEFAULT_TIMEOUT_MS],
   ["keep-tally-web", ["--filter", "@workspace/keep-tally", "run", "typecheck"], DEFAULT_TIMEOUT_MS],
 ];
 
+const profileMode = process.argv.includes("--profile");
+
 function selectedChecks() {
-  const wanted = process.argv.slice(2).filter((arg) => arg !== "--");
+  const wanted = process.argv.slice(2).filter((arg) => arg !== "--" && arg !== "--profile");
   if (wanted.length === 0) return checks;
   const selected = checks.filter(([name]) => wanted.includes(name));
   const known = new Set(checks.map(([name]) => name));
@@ -25,7 +28,8 @@ function selectedChecks() {
 function runCheck(name, args, timeoutMs) {
   return new Promise((resolve) => {
     const started = Date.now();
-    const child = spawn("corepack", ["pnpm", ...args], {
+    const typecheckArgs = profileMode ? [...args, "--", "--extendedDiagnostics", "--pretty", "false"] : args;
+    const child = spawn("corepack", ["pnpm", ...typecheckArgs], {
       stdio: ["ignore", "pipe", "pipe"],
       env: process.env,
       detached: true,

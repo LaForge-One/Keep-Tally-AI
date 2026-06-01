@@ -3,13 +3,17 @@
   "include": ["src/**/*"],
   "exclude": ["node_modules", "build", "dist", "**/*.test.ts"],
   "compilerOptions": {
+    "composite": true,
+    "incremental": true,
+    "disableSourceOfProjectReferenceRedirect": true,
     "noEmit": true,
     "jsx": "preserve",
     "lib": ["esnext", "dom", "dom.iterable"],
     "resolveJsonModule": true,
     "allowImportingTsExtensions": true,
     "moduleResolution": "bundler",
-    "types": ["node", "vite/client"],
+    "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo",
+    "types": ["vite/client"],
     "paths": {
       "@/*": ["./src/*"]
     }

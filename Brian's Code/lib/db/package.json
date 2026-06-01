@@ -17,7 +17,7 @@
     }
   },
   "scripts": {
-    "typecheck": "tsc -b tsconfig.json --force",
+    "typecheck": "tsc -b tsconfig.json",
     "check": "drizzle-kit check --config ./drizzle.config.ts",
     "generate": "drizzle-kit generate --config ./drizzle.config.ts",
     "migrate": "drizzle-kit migrate --config ./drizzle.config.ts",

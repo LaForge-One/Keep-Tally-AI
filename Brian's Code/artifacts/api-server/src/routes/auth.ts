@@ -1,10 +1,10 @@
-import { Router, type CookieOptions, type Request } from "express";
+import { Router, type CookieOptions, type IRouter, type Request } from "express";
 import { z } from "zod";
 import { signToken } from "../lib/auth-helpers";
 import { authenticateUser, changeUserPassword } from "../services/auth-service";
 import { requireAuth } from "../middleware/auth";
 
-const router = Router();
+const router: IRouter = Router();
 const COOKIE_NAME = "kt_token";
 
 function shouldUseSecureCookies(req: Request): boolean {

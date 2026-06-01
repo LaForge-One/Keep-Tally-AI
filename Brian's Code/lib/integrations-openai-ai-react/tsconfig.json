@@ -6,6 +6,7 @@
     "emitDeclarationOnly": true,
     "outDir": "dist",
     "rootDir": "src",
+    "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo",
     "lib": ["dom", "es2022"]
   },
   "include": ["src"]
