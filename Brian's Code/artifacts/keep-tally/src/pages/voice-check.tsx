@@ -515,11 +515,12 @@ export default function VoiceCheck() {
   /* ── Voice helpers ── */
   const safeSpeak = useCallback(async (text: string, opts: { audible?: boolean } = {}): Promise<boolean> => {
     if (controlRef.current.shouldStop || controlRef.current.shouldPause) return false;
+    const shouldPlayAudio = opts.audible ?? true;
     setStatusMessage(text);
     vibrate(30);
     if (VOICE_COUNT_TTS_ENABLED) {
       await speak(text);
-    } else if (opts.audible && VOICE_COUNT_CONFIRMATION_AUDIO_ENABLED) {
+    } else if (shouldPlayAudio && VOICE_COUNT_CONFIRMATION_AUDIO_ENABLED) {
       await speakBrowser(text);
     }
     return !controlRef.current.shouldStop && !controlRef.current.shouldPause;
@@ -529,7 +530,17 @@ export default function VoiceCheck() {
     if (controlRef.current.shouldStop || controlRef.current.shouldPause) return null;
     vibrate([50, 30, 50]);
     setVoiceCapture({ state: "requesting-microphone" });
-    const result = await listenDetailed(timeoutMs, setVoiceCapture);
+    setStatusMessage("Opening microphone...");
+    const result = await listenDetailed(timeoutMs, (progress) => {
+      setVoiceCapture(progress);
+      if (progress.state === "requesting-microphone") {
+        setStatusMessage("Opening microphone...");
+      } else if (progress.state === "recording") {
+        setStatusMessage("Recording voice...");
+      } else if (progress.state === "transcribing") {
+        setStatusMessage("Transcribing audio...");
+      }
+    });
     setVoiceCapture(null);
     if (controlRef.current.shouldStop || controlRef.current.shouldPause) return null;
     if (controlRef.current.shouldSkip || controlRef.current.shouldRepeat) return "";
@@ -537,6 +548,7 @@ export default function VoiceCheck() {
       const message = listenMessage(result);
       if (message) {
         setVoiceNotice(message);
+        setStatusMessage(message);
         toast({
           title: "Voice input issue",
           description: message,
@@ -554,6 +566,7 @@ export default function VoiceCheck() {
     const transcript = result.transcript;
     setVoiceNotice("");
     setLastHeard(transcript || "");
+    setStatusMessage(transcript ? `Heard "${transcript}".` : "No speech was transcribed.");
     return transcript;
   }, [listenDetailed]);
 
@@ -779,10 +792,10 @@ export default function VoiceCheck() {
     } else if (controlRef.current.shouldPause) {
       setPhase("paused");
     } else {
-      await speak("Count mode complete.");
+      await safeSpeak("Count mode complete.");
       setPhase("complete");
     }
-  }, [safeSpeak, safeListen, addResult, speak, acquireWakeLock, releaseWakeLock, items, notifySaveFailed, confirmLargeChange]);
+  }, [safeSpeak, safeListen, addResult, acquireWakeLock, releaseWakeLock, items, notifySaveFailed, confirmLargeChange]);
 
   /* ── AI VOICE session (Custom mode) ── */
   const runCustomSession = useCallback(async (sessionItems: Item[]) => {
@@ -937,10 +950,10 @@ export default function VoiceCheck() {
     if (controlRef.current.shouldPause) {
       setPhase("paused");
     } else {
-      await speak("Count complete.");
+      await safeSpeak("Count complete.");
       setPhase("complete");
     }
-  }, [safeSpeak, safeListen, addResult, speak, acquireWakeLock, releaseWakeLock, notifySaveFailed, confirmLargeChange, confirmSpokenCount, notifyCountSaved]);
+  }, [safeSpeak, safeListen, addResult, acquireWakeLock, releaseWakeLock, notifySaveFailed, confirmLargeChange, confirmSpokenCount, notifyCountSaved]);
 
   /* ── Build queue & start ── */
   const buildQueue = useCallback((): Item[] => {
