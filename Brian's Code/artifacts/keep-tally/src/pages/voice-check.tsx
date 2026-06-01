@@ -599,14 +599,15 @@ export default function VoiceCheck() {
     await safeSpeak("Could not save. Try again.", { audible: true });
   }, [safeSpeak]);
 
-  const notifyCountSaved = useCallback((message: string) => {
+  const notifyCountSaved = useCallback(async (message: string) => {
     setVoiceNotice(message);
     setStatusMessage(message);
     toast({
       title: "Count saved",
       description: message,
     });
-  }, []);
+    await safeSpeak(message, { audible: true });
+  }, [safeSpeak]);
 
   const confirmLargeChange = useCallback(async (item: Item, quantity: number) => {
     if (!isLargeQuantityChange(item, quantity)) return true;
@@ -831,7 +832,7 @@ export default function VoiceCheck() {
       let aiCustom: GPTParseResult = { action: "unknown" };
       if (localParse && "ambiguous" in localParse) {
         const candidates = localParse.ambiguous.map((item) => item.name).join(", ");
-        const message = `That could be ${candidates}. Please say a more specific item name.`;
+        const message = `I heard "${transcript}", but that could be ${candidates}. Please say a more specific item name.`;
         setVoiceNotice(message);
         setStatusMessage(message);
         await safeSpeak(message);
@@ -851,17 +852,19 @@ export default function VoiceCheck() {
       if (aiCustom.action === "done") break;
 
       if (aiCustom.action !== "custom") {
-        const message = "Could not match that item and count. Try the full item name plus a number.";
+        const message = `I heard "${transcript}", but I could not match that to an item and count in ${sessionLocation ?? "this location"}. Try the full item name plus a number.`;
         setVoiceNotice(message);
         setStatusMessage(message);
-        await safeSpeak("Didn't recognize that. Try again.");
+        await safeSpeak(message);
         continue;
       }
 
       const item = sessionItems.find((it) => it.id === aiCustom.itemId) ?? null;
       if (!item) {
-        setVoiceNotice("The parsed item is not in the current location list. Try another item name.");
-        await safeSpeak("Didn't recognize that. Try again.");
+        const message = `I matched ${aiCustom.itemName}, but it is not available in ${sessionLocation ?? "this location"}. Try another item name.`;
+        setVoiceNotice(message);
+        setStatusMessage(message);
+        await safeSpeak(message);
         continue;
       }
 
@@ -887,7 +890,7 @@ export default function VoiceCheck() {
         }
         await safeSpeak("OK");
         addResult({ item, expected: item.quantity, counted: quantity, diff: 0, status: "verified", adjustmentType: null });
-        notifyCountSaved(`${item.name}: count ${quantity} verified and written to inventory history.`);
+        await notifyCountSaved(`${item.name}: count ${quantity} verified and written to inventory history.`);
 
       } else if (quantity > item.quantity) {
         if (!(await confirmLargeChange(item, quantity))) {
@@ -903,8 +906,7 @@ export default function VoiceCheck() {
           continue;
         }
         addResult({ item, expected: item.quantity, counted: quantity, diff: quantity - item.quantity, status: "updated-higher", adjustmentType: "Adjustment" });
-        notifyCountSaved(`${item.name}: count updated to ${quantity} and written to inventory history.`);
-        await safeSpeak(`${item.name}: ${quantity}. Saved.`);
+        await notifyCountSaved(`${item.name}: count updated to ${quantity} and written to inventory history.`);
 
       } else {
         setPendingCounted(quantity);
@@ -937,9 +939,8 @@ export default function VoiceCheck() {
           continue;
         }
         addResult({ item, expected: item.quantity, counted: quantity, diff: quantity - item.quantity, status: "updated-lower", adjustmentType: reason });
-        notifyCountSaved(`${item.name}: count updated to ${quantity} with reason ${reason} and written to inventory history.`);
+        await notifyCountSaved(`${item.name}: count updated to ${quantity} with reason ${reason} and written to inventory history.`);
         vibrate([50, 50, 100]);
-        await safeSpeak(`Saved as ${reason}.`);
         setPendingCounted(null);
       }
     }
