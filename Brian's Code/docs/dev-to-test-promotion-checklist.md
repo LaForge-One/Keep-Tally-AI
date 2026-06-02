@@ -93,6 +93,44 @@ ls -l \
   docs/dev-to-test-promotion-checklist.md
 ```
 
+## VPS Stack Start And Stop Helper
+
+The repo includes a helper script for common dev and test container actions:
+
+```bash
+./scripts/vps-stack.sh <dev|test> <start|stop|restart|status|logs|health> [--with-ai]
+```
+
+Dev stack examples:
+
+```bash
+./scripts/vps-stack.sh dev start
+./scripts/vps-stack.sh dev status
+./scripts/vps-stack.sh dev health
+./scripts/vps-stack.sh dev logs
+./scripts/vps-stack.sh dev stop
+```
+
+Test stack examples:
+
+```bash
+./scripts/vps-stack.sh test start
+./scripts/vps-stack.sh test status
+./scripts/vps-stack.sh test health
+./scripts/vps-stack.sh test logs
+./scripts/vps-stack.sh test stop
+```
+
+If the test stack is using the LocalAI compose file, include `--with-ai`:
+
+```bash
+./scripts/vps-stack.sh test start --with-ai
+./scripts/vps-stack.sh test restart --with-ai
+./scripts/vps-stack.sh test logs --with-ai
+```
+
+The helper does not modify databases or environment files. It only wraps Docker Compose container actions.
+
 ## Test Environment Configuration Check
 
 Confirm the test lane is still using test configuration, not dev configuration:
