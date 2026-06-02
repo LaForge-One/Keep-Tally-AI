@@ -57,7 +57,7 @@ Do not copy development environment files directly into test. The test lane shou
 Run these checks from the local workstation before relying on the update:
 
 ```bash
-cd "/Users/la-forge.fox/Documents/Keep Tally Brians Code"
+cd "/Users/la-forge.fox/Documents/Keep Tally Brians Code/Brian's Code"
 
 corepack pnpm run test:voice-count
 ```
@@ -67,6 +67,12 @@ Expected:
 - Voice count regression tests pass.
 - No code changes are left unstaged except local environment files that should not be committed.
 - `HEAD` matches `origin/main` after the promotion commit is pushed.
+
+Important:
+
+- The outer folder is the Git repository root.
+- The runnable Node workspace is inside `Brian's Code`.
+- Run `pnpm install`, `pnpm run`, and `corepack pnpm run` commands from `Brian's Code`, not from the outer folder.
 
 ## VPS Test Promotion Commands
 
@@ -243,4 +249,3 @@ docker compose \
 Proceed with promotion only after the local regression test and VPS preflight pass.
 
 This promotion is appropriate for user access testing because the recent development updates directly address voice count reliability, auditability, and performance. It should still be treated as a test environment update, not a production release.
-
