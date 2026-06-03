@@ -10,6 +10,7 @@
     "smoke": "node scripts/dev-smoke.mjs",
     "workflow:test": "node scripts/dev-workflow-test.mjs",
     "test:voice-count": "corepack pnpm --filter @workspace/scripts run test:voice-count",
+    "test:mobile-scanner-risks": "corepack pnpm --filter @workspace/scripts run test:mobile-scanner-risks",
     "deploy:preflight": "corepack pnpm --filter @workspace/scripts run deploy:preflight",
     "dev:reset-admin": "corepack pnpm --filter @workspace/scripts run reset-admin-password",
     "build": "corepack pnpm run typecheck && corepack pnpm -r --if-present run build",
