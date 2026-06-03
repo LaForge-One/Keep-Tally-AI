@@ -30,6 +30,7 @@ import {
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const ALL_LOCATIONS = [...LOCATIONS, "Warehouse"] as const;
 const SCANNER_ID = "inv-barcode-reader";
+const MOBILE_SCANNER_V2_ENABLED = import.meta.env.VITE_MOBILE_SCANNER_V2_ENABLED === "true";
 
 type WarehouseItemData = {
   id: number;
@@ -351,6 +352,24 @@ export function InventoryScanner({ open, onClose, inventoryType = "store" }: Inv
 
   const item = result?.storeItem;
   const otherItem = result?.otherItems?.[0];
+  const scannerStep =
+    phase === "camera"
+      ? cameraActive
+        ? "Camera ready"
+        : cameraError
+          ? "Camera needs attention"
+          : "Starting camera"
+      : loading
+        ? "Looking up barcode"
+        : submitting
+          ? "Saving inventory action"
+          : result?.storeItem
+            ? "Store item matched"
+            : result?.warehouseItem
+              ? "Warehouse item matched"
+              : result?.otherItems?.length
+                ? "Matched another location"
+                : "Ready for next action";
 
   /* ── Full-screen overlay ── */
   return (
@@ -403,6 +422,17 @@ export function InventoryScanner({ open, onClose, inventoryType = "store" }: Inv
                 {selectedLocation ?? "Scan Barcode"}
               </span>
             </div>
+
+            {MOBILE_SCANNER_V2_ENABLED && (
+              <div className="absolute left-4 right-16 bottom-4 z-20 rounded-xl border border-white/15 bg-black/65 px-3 py-2 text-white backdrop-blur-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-sky-200">Mobile scanner</p>
+                  <p className="text-xs text-white/70">{inventoryType === "warehouse" ? "Warehouse" : selectedLocation ?? "Store"}</p>
+                </div>
+                <p className="mt-1 text-sm font-semibold">{scannerStep}</p>
+                <p className="mt-0.5 text-xs text-white/65">UPC lookup uses product identifiers first, then legacy barcodes.</p>
+              </div>
+            )}
           </div>
 
           {/* Bottom toolbar */}
@@ -488,6 +518,19 @@ export function InventoryScanner({ open, onClose, inventoryType = "store" }: Inv
               <X className="w-4 h-4" />
             </button>
           </div>
+
+          {MOBILE_SCANNER_V2_ENABLED && (
+            <div className="border-b border-border bg-sky-50 px-4 py-3 text-sky-950">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs font-semibold uppercase tracking-wide">Mobile scanner status</p>
+                <p className="text-xs font-mono">{barcode || "no scan"}</p>
+              </div>
+              <p className="mt-1 text-sm font-semibold">{scannerStep}</p>
+              <p className="mt-0.5 text-xs text-sky-800">
+                Identity lookup checks normalized UPC/SKU records before legacy item barcodes.
+              </p>
+            </div>
+          )}
 
           <div className="flex-1 overflow-y-auto">
             {/* ── RESULT VIEW ── */}

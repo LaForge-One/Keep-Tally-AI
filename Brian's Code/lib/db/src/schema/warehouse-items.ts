@@ -1,5 +1,6 @@
 import { index, pgTable, serial, text, integer, real, date, timestamp } from "drizzle-orm/pg-core";
 import { accountsTable } from "./accounts";
+import { productsTable } from "./products";
 import { warehousesTable } from "./warehouses";
 
 export const warehouseItemsTable = pgTable(
@@ -7,6 +8,7 @@ export const warehouseItemsTable = pgTable(
   {
     id: serial("id").primaryKey(),
     accountId: integer("account_id").references(() => accountsTable.id, { onDelete: "cascade" }),
+    productId: integer("product_id").references(() => productsTable.id, { onDelete: "set null" }),
     warehouseId: integer("warehouse_id").references(() => warehousesTable.id, { onDelete: "set null" }),
     name: text("name").notNull(),
     barcode: text("barcode"),
@@ -24,6 +26,7 @@ export const warehouseItemsTable = pgTable(
   },
   (table) => ({
     accountWarehouseIdx: index("warehouse_items_account_warehouse_idx").on(table.accountId, table.warehouseId),
+    accountProductWarehouseIdx: index("warehouse_items_account_product_warehouse_idx").on(table.accountId, table.productId, table.warehouseId),
     accountBarcodeIdx: index("warehouse_items_account_barcode_idx").on(table.accountId, table.barcode),
     accountWarehouseCategoryNameIdx: index("warehouse_items_account_warehouse_category_name_idx").on(
       table.accountId,

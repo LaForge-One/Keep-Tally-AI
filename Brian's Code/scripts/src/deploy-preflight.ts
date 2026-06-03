@@ -155,6 +155,12 @@ if (databaseUrl) {
         "warehouse_items_account_warehouse_category_name_idx",
         "count_sessions_account_status_started_idx",
         "count_session_events_account_session_created_idx",
+        "products_account_status_name_idx",
+        "products_account_category_name_idx",
+        "product_identifiers_account_normalized_code_idx",
+        "product_identifiers_account_product_idx",
+        "items_account_product_location_idx",
+        "warehouse_items_account_product_warehouse_idx",
       ];
       const indexes = await client.query(
         `
@@ -184,6 +190,24 @@ if (databaseUrl) {
         from scan_log s
         where s.item_id is not null
           and not exists (select 1 from items i where i.id = s.item_id)
+        union all
+        select 'items orphan product_id', count(*)::int
+        from items i
+        where i.product_id is not null
+          and not exists (select 1 from products p where p.id = i.product_id)
+        union all
+        select 'warehouse_items orphan product_id', count(*)::int
+        from warehouse_items wi
+        where wi.product_id is not null
+          and not exists (select 1 from products p where p.id = wi.product_id)
+        union all
+        select 'product_identifiers orphan product_id', count(*)::int
+        from product_identifiers pi
+        where not exists (select 1 from products p where p.id = pi.product_id)
+        union all
+        select 'product_identifiers blank normalized_code', count(*)::int
+        from product_identifiers
+        where trim(normalized_code) = ''
         union all
         select 'warehouse_purchases orphan warehouse_item_id', count(*)::int
         from warehouse_purchases wp

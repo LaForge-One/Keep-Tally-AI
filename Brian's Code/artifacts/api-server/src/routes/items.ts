@@ -6,6 +6,7 @@ import {
   historyTable,
   itemsTable,
   locationsTable,
+  productIdentifiersTable,
   scanLogTable,
   warehouseItemsTable,
   type ItemRow,
@@ -78,6 +79,26 @@ function allowedLocationIds(req: Request): number[] {
 
 function assignedLocations(req: Request): string[] {
   return req.authUser?.assignedLocations ?? [];
+}
+
+function normalizeIdentifier(value: string | null | undefined): string {
+  return String(value ?? "").trim().toLowerCase().replace(/[^0-9a-z]/g, "");
+}
+
+async function productIdsForIdentifier(accountId: number, barcode: string): Promise<number[]> {
+  const normalizedCode = normalizeIdentifier(barcode);
+  if (!normalizedCode) return [];
+  const rows = await db
+    .select({ productId: productIdentifiersTable.productId })
+    .from(productIdentifiersTable)
+    .where(
+      and(
+        eq(productIdentifiersTable.accountId, accountId),
+        eq(productIdentifiersTable.normalizedCode, normalizedCode),
+        eq(productIdentifiersTable.status, "active"),
+      ),
+    );
+  return [...new Set(rows.map((row) => row.productId))];
 }
 
 function mergeById<T extends { id: number }>(rows: T[][]): T[] {
@@ -262,6 +283,7 @@ router.get("/items/barcode/:barcode", async (req, res) => {
   const barcode = normalizeBarcode(req.params.barcode);
   const requestedLocation = String(req.query.location ?? "").trim();
   const inventoryType = String(req.query.inventoryType ?? "store").trim().toLowerCase();
+  const productIds = await productIdsForIdentifier(req.account!.id, barcode);
 
   if (!barcode) {
     res.status(400).json({ error: "barcode is required" });
@@ -283,14 +305,17 @@ router.get("/items/barcode/:barcode", async (req, res) => {
       if (!resolvedLocation) return;
     }
 
+    const productFilter = productIds.length > 0 ? inArray(itemsTable.productId, productIds) : undefined;
+    const legacyBarcodeFilter = eq(itemsTable.barcode, barcode);
     const rows = await db
       .select()
       .from(itemsTable)
-      .where(eq(itemsTable.accountId, req.account!.id))
+      .where(and(eq(itemsTable.accountId, req.account!.id), productFilter ? or(productFilter, legacyBarcodeFilter) : legacyBarcodeFilter))
       .orderBy(itemsTable.name);
 
     const matchedStoreItem = rows.find((item) => {
-      if (normalizeBarcode(item.barcode) !== barcode) return false;
+      const identifierMatched = item.productId !== null && productIds.includes(item.productId);
+      if (!identifierMatched && normalizeBarcode(item.barcode) !== barcode) return false;
       if (resolvedLocation) {
         return item.locationId === resolvedLocation.id || item.location === resolvedLocation.name;
       }
@@ -313,12 +338,17 @@ router.get("/items/barcode/:barcode", async (req, res) => {
       return;
     }
 
+    const productFilter = productIds.length > 0 ? inArray(warehouseItemsTable.productId, productIds) : undefined;
+    const legacyBarcodeFilter = eq(warehouseItemsTable.barcode, barcode);
     const rows = await db
       .select()
       .from(warehouseItemsTable)
-      .where(eq(warehouseItemsTable.accountId, req.account!.id))
+      .where(and(eq(warehouseItemsTable.accountId, req.account!.id), productFilter ? or(productFilter, legacyBarcodeFilter) : legacyBarcodeFilter))
       .orderBy(warehouseItemsTable.name);
-    const matchedWarehouseItem = rows.find((item) => normalizeBarcode(item.barcode) === barcode);
+    const matchedWarehouseItem = rows.find((item) => {
+      const identifierMatched = item.productId !== null && productIds.includes(item.productId);
+      return identifierMatched || normalizeBarcode(item.barcode) === barcode;
+    });
     if (matchedWarehouseItem) {
       res.json({ found: true, inventoryType: "warehouse", item: serializeWarehouseLookupItem(matchedWarehouseItem) });
       return;

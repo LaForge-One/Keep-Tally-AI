@@ -1,12 +1,14 @@
 import { pgTable, serial, text, integer, timestamp, index } from "drizzle-orm/pg-core";
 import { accountsTable } from "./accounts";
 import { locationsTable } from "./locations";
+import { productsTable } from "./products";
 
 export const itemsTable = pgTable(
   "items",
   {
     id: serial("id").primaryKey(),
     accountId: integer("account_id").references(() => accountsTable.id, { onDelete: "cascade" }),
+    productId: integer("product_id").references(() => productsTable.id, { onDelete: "set null" }),
     locationId: integer("location_id").references(() => locationsTable.id, { onDelete: "set null" }),
     name: text("name").notNull(),
     category: text("category").notNull(),
@@ -25,6 +27,7 @@ export const itemsTable = pgTable(
   },
   (table) => ({
     accountLocationIdx: index("items_account_location_idx").on(table.accountId, table.locationId),
+    accountProductLocationIdx: index("items_account_product_location_idx").on(table.accountId, table.productId, table.locationId),
     accountLocationNameIdx: index("items_account_location_name_idx").on(table.accountId, table.locationId, table.name),
     accountLegacyLocationNameIdx: index("items_account_legacy_location_name_idx").on(table.accountId, table.location, table.name),
     accountBarcodeIdx: index("items_account_barcode_idx").on(table.accountId, table.barcode),

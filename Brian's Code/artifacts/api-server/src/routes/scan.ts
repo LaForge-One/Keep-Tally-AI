@@ -5,6 +5,8 @@ import {
   db,
   itemsTable,
   historyTable,
+  productIdentifiersTable,
+  productsTable,
   scanLogTable,
   warehouseItemsTable,
   locationsTable,
@@ -77,52 +79,133 @@ function mergeById<T extends { id: number }>(rows: T[][]): T[] {
   return Array.from(merged.values());
 }
 
+function normalizeIdentifier(value: string | null | undefined): string {
+  return String(value ?? "").trim().toLowerCase().replace(/[^0-9a-z]/g, "");
+}
+
+function productIdSetFromIdentifiers(rows: { productId: number }[]): number[] {
+  return [...new Set(rows.map((row) => row.productId).filter((id) => Number.isInteger(id)))];
+}
+
+async function getOrCreateProduct(accountId: number, name: string, category: string): Promise<number> {
+  const [existing] = await db
+    .select({ id: productsTable.id })
+    .from(productsTable)
+    .where(and(eq(productsTable.accountId, accountId), eq(productsTable.name, name), eq(productsTable.category, category)))
+    .limit(1);
+  if (existing) return existing.id;
+
+  const [created] = await db
+    .insert(productsTable)
+    .values({ accountId, name, category, status: "active" })
+    .returning({ id: productsTable.id });
+  return created!.id;
+}
+
+async function ensureProductIdentifier(accountId: number, productId: number | null, barcode: string, source: string) {
+  const normalizedCode = normalizeIdentifier(barcode);
+  if (!productId || !normalizedCode) return;
+
+  const [existing] = await db
+    .select({ id: productIdentifiersTable.id })
+    .from(productIdentifiersTable)
+    .where(
+      and(
+        eq(productIdentifiersTable.accountId, accountId),
+        eq(productIdentifiersTable.productId, productId),
+        eq(productIdentifiersTable.normalizedCode, normalizedCode),
+        eq(productIdentifiersTable.type, "upc"),
+      ),
+    )
+    .limit(1);
+  if (existing) return;
+
+  await db.insert(productIdentifiersTable).values({
+    accountId,
+    productId,
+    code: barcode,
+    normalizedCode,
+    type: "upc",
+    unitMultiplier: 1,
+    status: "active",
+    primaryForType: true,
+    source,
+  });
+}
+
+function locationScopedItemsQuery(req: Request, barcode: string, productIds: number[], resolvedLocation: LocationRow | null) {
+  const normalized = normalizeIdentifier(barcode);
+  const productFilter = productIds.length > 0 ? inArray(itemsTable.productId, productIds) : undefined;
+  const barcodeFilter = eq(itemsTable.barcode, barcode);
+  const baseMatch = productFilter ? or(productFilter, barcodeFilter) : barcodeFilter;
+
+  if (resolvedLocation) {
+    return and(
+      eq(itemsTable.accountId, req.account!.id),
+      baseMatch,
+      or(eq(itemsTable.locationId, resolvedLocation.id), eq(itemsTable.location, resolvedLocation.name)),
+    );
+  }
+
+  if (canViewAllLocations(req)) {
+    return and(eq(itemsTable.accountId, req.account!.id), baseMatch);
+  }
+
+  const allowedLocationIds = req.allowedLocationIds ?? [];
+  const legacyLocations = req.authUser?.assignedLocations ?? [];
+  if (allowedLocationIds.length > 0 && legacyLocations.length > 0) {
+    return and(
+      eq(itemsTable.accountId, req.account!.id),
+      baseMatch,
+      or(inArray(itemsTable.locationId, allowedLocationIds), inArray(itemsTable.location, legacyLocations)),
+    );
+  }
+  if (allowedLocationIds.length > 0) {
+    return and(eq(itemsTable.accountId, req.account!.id), baseMatch, inArray(itemsTable.locationId, allowedLocationIds));
+  }
+  if (legacyLocations.length > 0) {
+    return and(eq(itemsTable.accountId, req.account!.id), baseMatch, inArray(itemsTable.location, legacyLocations));
+  }
+
+  return and(eq(itemsTable.accountId, req.account!.id), eq(itemsTable.barcode, `__no_access_${normalized}`));
+}
+
+function warehouseItemsQuery(req: Request, barcode: string, productIds: number[]) {
+  const productFilter = productIds.length > 0 ? inArray(warehouseItemsTable.productId, productIds) : undefined;
+  const barcodeFilter = eq(warehouseItemsTable.barcode, barcode);
+  const baseMatch = productFilter ? or(productFilter, barcodeFilter) : barcodeFilter;
+  return and(eq(warehouseItemsTable.accountId, req.account!.id), baseMatch);
+}
+
 /* ── GET /scan/lookup?barcode=X&location=Y ── */
 router.get("/scan/lookup", async (req, res) => {
   const barcode = String(req.query.barcode ?? "").trim();
   const location = String(req.query.location ?? "").trim();
+  const normalizedBarcode = normalizeIdentifier(barcode);
 
-  if (!barcode) {
+  if (!barcode || !normalizedBarcode) {
     res.status(400).json({ error: "barcode is required" });
     return;
   }
   const resolvedLocation = location ? await resolveLocationByName(req, res, location) : null;
   if (location && !resolvedLocation) return;
 
-  const allowedLocationIds = req.allowedLocationIds ?? [];
-  const legacyLocations = req.authUser?.assignedLocations ?? [];
-  const barcodeItems = location
-    ? await db
-        .select()
-        .from(itemsTable)
-        .where(
-          canViewAllLocations(req)
-            ? and(eq(itemsTable.accountId, req.account!.id), eq(itemsTable.barcode, barcode))
-            : and(
-                eq(itemsTable.accountId, req.account!.id),
-                eq(itemsTable.barcode, barcode),
-                or(eq(itemsTable.locationId, resolvedLocation!.id), eq(itemsTable.location, resolvedLocation!.name)),
-              ),
-        )
-    : canViewAllLocations(req)
-      ? await db.select().from(itemsTable).where(and(eq(itemsTable.accountId, req.account!.id), eq(itemsTable.barcode, barcode)))
-      : allowedLocationIds.length > 0 && legacyLocations.length > 0
-        ? await db.select().from(itemsTable).where(
-            and(
-              eq(itemsTable.accountId, req.account!.id),
-              eq(itemsTable.barcode, barcode),
-              or(inArray(itemsTable.locationId, allowedLocationIds), inArray(itemsTable.location, legacyLocations)),
-            ),
-          )
-        : allowedLocationIds.length > 0
-          ? await db.select().from(itemsTable).where(
-              and(eq(itemsTable.accountId, req.account!.id), eq(itemsTable.barcode, barcode), inArray(itemsTable.locationId, allowedLocationIds)),
-            )
-          : legacyLocations.length > 0
-            ? await db.select().from(itemsTable).where(
-                and(eq(itemsTable.accountId, req.account!.id), eq(itemsTable.barcode, barcode), inArray(itemsTable.location, legacyLocations)),
-              )
-            : [];
+  const identifierRows = await db
+    .select({ productId: productIdentifiersTable.productId })
+    .from(productIdentifiersTable)
+    .where(
+      and(
+        eq(productIdentifiersTable.accountId, req.account!.id),
+        eq(productIdentifiersTable.normalizedCode, normalizedBarcode),
+        eq(productIdentifiersTable.status, "active"),
+      ),
+    );
+  const productIds = productIdSetFromIdentifiers(identifierRows);
+
+  const barcodeItems = await db
+    .select()
+    .from(itemsTable)
+    .where(locationScopedItemsQuery(req, barcode, productIds, resolvedLocation));
 
   const storeItems = location
     ? barcodeItems.filter((item) => item.locationId === resolvedLocation!.id || item.location === resolvedLocation!.name)
@@ -137,7 +220,7 @@ router.get("/scan/lookup", async (req, res) => {
       ? await db
         .select()
         .from(warehouseItemsTable)
-        .where(and(eq(warehouseItemsTable.accountId, req.account!.id), eq(warehouseItemsTable.barcode, barcode)))
+        .where(warehouseItemsQuery(req, barcode, productIds))
         .limit(1)
       : [];
 
@@ -146,6 +229,7 @@ router.get("/scan/lookup", async (req, res) => {
       storeItem: null,
       otherItems: [],
       warehouseItem: warehouseItems[0] ?? null,
+      identifierMatched: productIds.length > 0,
     });
     return;
   }
@@ -155,6 +239,7 @@ router.get("/scan/lookup", async (req, res) => {
     storeItem: storeItems[0] ?? null,
     otherItems,
     warehouseItem: null,
+    identifierMatched: productIds.length > 0,
   });
 });
 
@@ -277,8 +362,10 @@ router.post("/scan/action", async (req, res) => {
       return;
     }
 
+    const productId = source.productId ?? await getOrCreateProduct(req.account!.id, source.name, data.category ?? source.category);
     const [inserted] = await db.insert(itemsTable).values({
       accountId: req.account!.id,
+      productId,
       locationId: resolvedLocation.id,
       name: source.name,
       category: data.category ?? source.category,
@@ -293,6 +380,7 @@ router.post("/scan/action", async (req, res) => {
       res.status(500).json({ error: "Failed to create item" });
       return;
     }
+    await ensureProductIdentifier(req.account!.id, productId, data.barcode, "scan_add_to_store");
 
     await db.insert(historyTable).values({
       accountId: req.account!.id,
@@ -328,8 +416,10 @@ router.post("/scan/action", async (req, res) => {
     const resolvedLocation = await resolveLocationByName(req, res, data.location);
     if (!resolvedLocation) return;
 
+    const productId = await getOrCreateProduct(req.account!.id, data.name, data.category);
     const [inserted] = await db.insert(itemsTable).values({
       accountId: req.account!.id,
+      productId,
       locationId: resolvedLocation.id,
       name: data.name,
       category: data.category,
@@ -344,6 +434,7 @@ router.post("/scan/action", async (req, res) => {
       res.status(500).json({ error: "Failed to create item" });
       return;
     }
+    await ensureProductIdentifier(req.account!.id, productId, data.barcode, "scan_create");
 
     await db.insert(historyTable).values({
       accountId: req.account!.id,
