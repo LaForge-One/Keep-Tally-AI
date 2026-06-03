@@ -29,6 +29,13 @@ Expected result: preview values are safe to send directly to apply.
 
 - [ ] Scan an existing store item barcode and see item details.
 - [ ] Scan a missing barcode and see Item not found.
+- [ ] Run automated mobile native scanner risk battery before scanner promotion.
+- [ ] Confirm iPhone native Camera scan cannot write inventory without KeepTally confirmation.
+- [ ] Confirm Android native Camera scan cannot write inventory without KeepTally confirmation.
+- [ ] Confirm external or spoofed QR URLs are rejected.
+- [ ] Confirm in-app scanner works over HTTPS on mobile.
+- [ ] Confirm denied camera permission shows manual barcode entry fallback.
+- [ ] Confirm repeated scans do not create duplicate inventory updates.
 - [ ] Apply Spoilage and confirm quantity decreases.
 - [ ] Apply Theft and confirm quantity decreases.
 - [ ] Apply warehouse adjustment and confirm warehouse quantity changes.
@@ -47,3 +54,13 @@ pnpm --filter @workspace/scripts run check:import-fixtures
 ```
 
 Expected result: `Import fixture checks passed`.
+
+## Scanner Risk Battery
+
+Run this from `Brian's Code` before promoting scanner changes from dev to test:
+
+```powershell
+corepack pnpm run test:mobile-scanner-risks
+```
+
+Expected result: all mobile native scanner risk tests pass.

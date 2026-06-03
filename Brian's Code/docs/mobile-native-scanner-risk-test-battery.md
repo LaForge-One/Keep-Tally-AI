@@ -199,4 +199,13 @@ This risk area should be considered controlled when:
 
 ## Recommendation
 
-Add the automated test battery to the regular pre-promotion checklist and run the manual mobile tests before promoting scanner changes from dev to test.
+This recommendation has been formalized in:
+
+- `docs/dev-to-test-promotion-checklist.md`
+- `docs/field-test-import-scanner-checklist.md`
+
+Before promoting scanner changes from dev to test:
+
+1. Run `corepack pnpm run test:mobile-scanner-risks`.
+2. Complete the manual iPhone and Android native scanner checks.
+3. Confirm no native scan can write inventory without KeepTally authentication, location selection, and in-app confirmation.

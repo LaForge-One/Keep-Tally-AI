@@ -60,11 +60,13 @@ Run these checks from the local workstation before relying on the update:
 cd "/Users/la-forge.fox/Documents/Keep Tally Brians Code/Brian's Code"
 
 corepack pnpm run test:voice-count
+corepack pnpm run test:mobile-scanner-risks
 ```
 
 Expected:
 
 - Voice count regression tests pass.
+- Mobile native scanner risk tests pass.
 - No code changes are left unstaged except local environment files that should not be committed.
 - `HEAD` matches `origin/main` after the promotion commit is pushed.
 
@@ -73,6 +75,42 @@ Important:
 - The outer folder is the Git repository root.
 - The runnable Node workspace is inside `Brian's Code`.
 - Run `pnpm install`, `pnpm run`, and `corepack pnpm run` commands from `Brian's Code`, not from the outer folder.
+
+## Scanner Promotion Gate
+
+Scanner changes must pass both automated and manual checks before they are promoted from dev to test.
+
+Automated command:
+
+```bash
+cd "/Users/la-forge.fox/Documents/Keep Tally Brians Code/Brian's Code"
+
+corepack pnpm run test:mobile-scanner-risks
+```
+
+Expected:
+
+- Native camera deep links can prefill lookup but cannot write inventory.
+- Native scanner input cannot bypass authentication.
+- Scanner input without a selected location cannot write inventory.
+- External URLs and unsupported QR payloads are rejected.
+- Duplicate action IDs do not write twice.
+- UPC normalization handles formatting differences.
+
+Manual mobile checks:
+
+- iPhone native Camera opens a KeepTally scan link but does not write inventory automatically.
+- Android native Camera opens a KeepTally scan link but does not write inventory automatically.
+- External or spoofed scan URLs are rejected.
+- In-app mobile scanner works over HTTPS.
+- If camera permission is denied, manual barcode entry still works.
+- Repeated scans do not create duplicate inventory updates.
+
+Reference document:
+
+```text
+docs/mobile-native-scanner-risk-test-battery.md
+```
 
 ## VPS Test Promotion Commands
 
