@@ -9,7 +9,7 @@ services:
     image: keeptally:test
     restart: unless-stopped
     env_file:
-      - .env.production
+      - ${KEEP_TALLY_ENV_FILE:-.env.vps-test}
     ports:
       # Bind to localhost so public traffic must pass through the HTTPS reverse proxy/access gate.
       - "127.0.0.1:${KEEP_TALLY_HOST_PORT:-3000}:3000"

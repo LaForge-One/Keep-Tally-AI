@@ -94,6 +94,7 @@ case "$STACK" in
       TEST_ENV_FILE=".env.production"
     fi
     require_file "$TEST_ENV_FILE"
+    export KEEP_TALLY_ENV_FILE="$TEST_ENV_FILE"
     COMPOSE+=(
       -f docker-compose.vps.example.yml
     )

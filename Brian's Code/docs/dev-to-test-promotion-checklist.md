@@ -129,7 +129,42 @@ If the test stack is using the LocalAI compose file, include `--with-ai`:
 ./scripts/vps-stack.sh test logs --with-ai
 ```
 
+Important:
+
+- Use `--with-ai` only when intentionally testing the self-hosted LocalAI stack.
+- Do not use `--with-ai` when the test lane should use OpenAI at `https://api.openai.com/v1`.
+- The LocalAI compose overlay changes `AI_INTEGRATIONS_OPENAI_BASE_URL` to `http://localai:8080/v1`, which can make OpenAI transcription and text-to-speech fail if LocalAI audio models are not configured.
+
 The helper does not modify databases or environment files. It only wraps Docker Compose container actions.
+
+## VPS AI Diagnostic Helper
+
+Use this when voice count reports that the VPS AI or OpenAI service is unavailable:
+
+```bash
+./scripts/vps-ai-diagnose.sh test
+```
+
+For dev:
+
+```bash
+./scripts/vps-ai-diagnose.sh dev
+```
+
+For an intentional LocalAI test:
+
+```bash
+./scripts/vps-ai-diagnose.sh test --with-ai
+```
+
+The diagnostic helper checks:
+
+- Which environment file is being used.
+- Whether AI base URL and model settings are present.
+- Whether the running container sees the same AI values.
+- Whether `/api/ai/status` and `/api/ai/connectivity` work locally on the VPS.
+
+The helper masks API keys in output.
 
 ## Test Environment Configuration Check
 
