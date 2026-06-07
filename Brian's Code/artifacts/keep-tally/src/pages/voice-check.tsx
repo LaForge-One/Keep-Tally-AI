@@ -44,6 +44,7 @@ const LARGE_DELTA_MIN_UNITS = 20;
 const VOICE_COUNT_TTS_ENABLED = import.meta.env.VITE_VOICE_COUNT_TTS_ENABLED === "true";
 const VOICE_COUNT_CONFIRMATION_AUDIO_ENABLED =
   import.meta.env.VITE_VOICE_COUNT_CONFIRMATION_AUDIO_ENABLED !== "false";
+const SILENCE_HOLD_MS = 5000;
 
 function listPageCount(total: number) {
   return Math.max(1, Math.ceil(total / LIST_PAGE_SIZE));
@@ -264,7 +265,7 @@ function listenMessage(result: ListenResult): string {
     case "unsupported":
       return "This browser does not support voice input for this screen.";
     case "silent":
-      return "No voice was detected. Try again a little closer to the mic.";
+      return "No voice was detected.";
     case "transcription-failed":
       return "Voice transcription failed on the VPS AI service. The session is paused so you can retry after checking the AI audio model.";
     case "microphone-timeout":
@@ -494,6 +495,7 @@ export default function VoiceCheck() {
   const isRunningRef = useRef(false);
   const lastVoiceLevelLogAtRef = useRef(0);
   const confirmationResolverRef = useRef<((choice: ConfirmationChoice) => void) | null>(null);
+  const silentListenAttemptsRef = useRef(0);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const wakeLockRef = useRef<any>(null);
 
@@ -768,13 +770,15 @@ export default function VoiceCheck() {
       const message = listenMessage(result);
       logVoiceStep("listen.failed", { reason: result.reason, message, diagnostics: result.diagnostics });
       if (message) {
-        setVoiceNotice(message);
         setStatusMessage(message);
-        toast({
-          title: "Voice input issue",
-          description: message,
-          variant: "destructive",
-        });
+        if (result.reason !== "silent") {
+          setVoiceNotice(message);
+          toast({
+            title: "Voice input issue",
+            description: message,
+            variant: "destructive",
+          });
+        }
       }
       setLastHeard("");
       await logVoiceAuditEvent({
@@ -791,6 +795,7 @@ export default function VoiceCheck() {
       return "";
     }
     const transcript = result.transcript;
+    silentListenAttemptsRef.current = 0;
     setVoiceNotice("");
     setLastHeard(transcript || "");
     setStatusMessage(transcript ? `Heard "${transcript}".` : "No speech was transcribed.");
@@ -803,6 +808,28 @@ export default function VoiceCheck() {
     });
     return transcript;
   }, [listenDetailed, logVoiceAuditEvent, logVoiceStep]);
+
+  const handleSilentListen = useCallback(async (context: "custom" | "queue" | "reason") => {
+    silentListenAttemptsRef.current += 1;
+    const attempt = silentListenAttemptsRef.current;
+    logVoiceStep("listen.silence-handled", { context, attempt });
+
+    if (attempt === 1) {
+      const message = "If you need a moment, let me know. I can hold briefly.";
+      setVoiceNotice(message);
+      setStatusMessage(message);
+      await safeSpeak(message, { audible: true });
+      await new Promise((resolve) => window.setTimeout(resolve, SILENCE_HOLD_MS));
+      return "retry" as const;
+    }
+
+    const message = "I still did not hear anything. I paused this Tally session so you can start the query again when ready.";
+    setVoiceNotice(message);
+    setStatusMessage(message);
+    await safeSpeak(message, { audible: true });
+    controlRef.current.shouldPause = true;
+    return "pause" as const;
+  }, [logVoiceStep, safeSpeak]);
 
   const runMicPrecheck = useCallback(async () => {
     setMicChecking(true);
@@ -904,6 +931,7 @@ export default function VoiceCheck() {
   const runSession = useCallback(async (queue: Item[], startIndex: number) => {
     if (isRunningRef.current) return;
     isRunningRef.current = true;
+    silentListenAttemptsRef.current = 0;
     controlRef.current = { shouldStop: false, shouldSkip: false, shouldRepeat: false, shouldPause: false };
     await acquireWakeLock();
     await startVoiceAuditSession(countMode ?? "all", queue.length);
@@ -928,6 +956,11 @@ export default function VoiceCheck() {
         setLastHeard("");
         const transcript = await safeListen(9000, buildVoiceGlossary([item]));
         if (transcript === null) break itemLoop;
+        if (!transcript.trim()) {
+          const silenceAction = await handleSilentListen("queue");
+          if (silenceAction === "pause") break itemLoop;
+          continue itemLoop;
+        }
 
         if (controlRef.current.shouldSkip) {
           addResult({ item, expected: item.quantity, counted: null, diff: null, status: "skipped", adjustmentType: null });
@@ -1069,6 +1102,14 @@ export default function VoiceCheck() {
           setLastHeard("");
           const reasonTranscript = await safeListen(12000);
           if (reasonTranscript === null) break itemLoop;
+          if (!reasonTranscript.trim()) {
+            const silenceAction = await handleSilentListen("reason");
+            if (silenceAction === "pause") {
+              setPendingCounted(null);
+              break itemLoop;
+            }
+            continue itemLoop;
+          }
 
           const aiReason = await parseWithAI(reasonTranscript || "", "reason", items, {
             sessionId: activeVoiceSessionIdRef.current,
@@ -1128,7 +1169,7 @@ export default function VoiceCheck() {
       await completeVoiceAuditSession("completed");
       setPhase("complete");
     }
-  }, [safeSpeak, safeListen, addResult, acquireWakeLock, releaseWakeLock, items, notifySaveFailed, notifyCountSaved, confirmLargeChange, confirmSpokenCount, countMode, startVoiceAuditSession, logVoiceAuditEvent, completeVoiceAuditSession]);
+  }, [safeSpeak, safeListen, addResult, acquireWakeLock, releaseWakeLock, items, notifySaveFailed, notifyCountSaved, confirmLargeChange, confirmSpokenCount, countMode, startVoiceAuditSession, logVoiceAuditEvent, completeVoiceAuditSession, handleSilentListen]);
 
   /* ── AI VOICE session (Custom mode) ── */
   const runCustomSession = useCallback(async (sessionItems: Item[]) => {
@@ -1137,6 +1178,7 @@ export default function VoiceCheck() {
       return;
     }
     isRunningRef.current = true;
+    silentListenAttemptsRef.current = 0;
     controlRef.current = { shouldStop: false, shouldSkip: false, shouldRepeat: false, shouldPause: false };
     try {
       logVoiceStep("custom.start", { items: sessionItems.length, location: sessionLocation });
@@ -1165,6 +1207,8 @@ export default function VoiceCheck() {
         // Silence / timeout → stay listening
         if (!transcript.trim()) {
           logVoiceStep("custom.listen.empty-transcript");
+          const silenceAction = await handleSilentListen("custom");
+          if (silenceAction === "pause") break;
           continue;
         }
 
@@ -1398,6 +1442,14 @@ export default function VoiceCheck() {
           setLastHeard("");
           const reasonTranscript = await safeListen(12000);
           if (reasonTranscript === null) break;
+          if (!reasonTranscript.trim()) {
+            const silenceAction = await handleSilentListen("reason");
+            if (silenceAction === "pause") {
+              setPendingCounted(null);
+              break;
+            }
+            continue;
+          }
 
           const aiReason = await parseWithAI(reasonTranscript || "", "reason", sessionItems, {
             sessionId: activeVoiceSessionIdRef.current,
@@ -1468,7 +1520,7 @@ export default function VoiceCheck() {
       await completeVoiceAuditSession(controlRef.current.shouldStop ? "cancelled" : "completed");
       setPhase("complete");
     }
-  }, [safeSpeak, safeListen, addResult, acquireWakeLock, releaseWakeLock, notifySaveFailed, confirmLargeChange, confirmSpokenCount, notifyCountSaved, logVoiceStep, sessionLocation, startVoiceAuditSession, logVoiceAuditEvent, completeVoiceAuditSession]);
+  }, [safeSpeak, safeListen, addResult, acquireWakeLock, releaseWakeLock, notifySaveFailed, confirmLargeChange, confirmSpokenCount, notifyCountSaved, logVoiceStep, sessionLocation, startVoiceAuditSession, logVoiceAuditEvent, completeVoiceAuditSession, handleSilentListen]);
 
   /* ── Build queue & start ── */
   const buildQueue = useCallback((): Item[] => {
@@ -1496,6 +1548,7 @@ export default function VoiceCheck() {
     setSessionResults([]);
     setResultsPage(1);
     setVoiceDebugEntries([]);
+    silentListenAttemptsRef.current = 0;
     logVoiceStep("start.clicked", {
       countMode,
       location: sessionLocation,

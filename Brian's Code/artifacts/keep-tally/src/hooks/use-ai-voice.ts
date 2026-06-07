@@ -29,7 +29,8 @@ export type ListenResult =
 
 export type ListenProgress =
   | { state: "requesting-microphone" }
-  | { state: "recording"; level: number }
+  | { state: "calibrating"; level: number; noiseFloor: number; threshold: number }
+  | { state: "recording"; level: number; speechDetected: boolean; noiseFloor: number; threshold: number }
   | { state: "transcribing" };
 
 export type MicrophonePrecheckResult =
@@ -80,7 +81,11 @@ const SILENCE_THRESHOLD = 8;
 const SILENCE_DURATION_MS = END_OF_UTTERANCE_SILENCE_MS;
 const MIN_RECORD_MS = 600;
 
-function createSilenceDetector(stream: MediaStream, onSilence: () => void, onLevel?: (level: number) => void) {
+function createSilenceDetector(
+  stream: MediaStream,
+  onSilence: () => void,
+  onLevel?: (level: number, speechDetected: boolean) => void,
+) {
   const ctx = new AudioContext();
   const source = ctx.createMediaStreamSource(stream);
   const analyser = ctx.createAnalyser();
@@ -97,9 +102,10 @@ function createSilenceDetector(stream: MediaStream, onSilence: () => void, onLev
     analyser.getByteFrequencyData(dataArray);
     const rms = Math.sqrt(dataArray.reduce((sum, value) => sum + value * value, 0) / dataArray.length);
     const now = Date.now();
-    onLevel?.(Math.min(100, Math.round((rms / 64) * 100)));
+    const speechDetected = rms >= SILENCE_THRESHOLD;
+    onLevel?.(Math.min(100, Math.round((rms / 64) * 100)), speechDetected);
 
-    if (rms < SILENCE_THRESHOLD) {
+    if (!speechDetected) {
       if (silenceStart === null) silenceStart = now;
       const elapsed = now - (startedAt + MIN_RECORD_MS);
       if (elapsed > 0 && now - silenceStart >= SILENCE_DURATION_MS && !triggered) {
@@ -383,6 +389,7 @@ export function useAIVoice() {
   const listenDetailed = useCallback(async (
     timeoutMs = 8000,
     onProgress?: (progress: ListenProgress) => void,
+    options: { glossary?: readonly string[] } = {},
   ): Promise<ListenResult> => {
     voiceLog("listen.start", { timeoutMs });
     if (abortedRef.current) return { ok: false, reason: "aborted" };
@@ -414,6 +421,7 @@ export function useAIVoice() {
     return new Promise<ListenResult>((resolve) => {
       const chunks: BlobPart[] = [];
       let finished = false;
+      let speechWasDetected = false;
 
       const mimeType = getRecordingMimeType();
       let recorder: MediaRecorder;
@@ -444,10 +452,11 @@ export function useAIVoice() {
       }
 
       stopRecordingRef.current = stopRecording;
-      stopSilenceDetector = createSilenceDetector(stream!, stopRecording, (level) => {
-        onProgress?.({ state: "recording", level });
+      stopSilenceDetector = createSilenceDetector(stream!, stopRecording, (level, speechDetected) => {
+        speechWasDetected ||= speechDetected;
+        onProgress?.({ state: "recording", level, speechDetected, noiseFloor: 0, threshold: SILENCE_THRESHOLD });
       });
-      onProgress?.({ state: "recording", level: 0 });
+      onProgress?.({ state: "recording", level: 0, speechDetected: false, noiseFloor: 0, threshold: SILENCE_THRESHOLD });
       voiceLog("listen.recording", { mimeType: mimeType || "browser-default" });
       recorder.start(250);
 
@@ -476,8 +485,8 @@ export function useAIVoice() {
         }
 
         const blob = new Blob(chunks, { type: mimeType || "audio/webm" });
-        if (blob.size < 1000) {
-          voiceLog("listen.silent", { chunks: chunks.length, bytes: blob.size });
+        if (!speechWasDetected || blob.size < 1000) {
+          voiceLog("listen.silent", { chunks: chunks.length, bytes: blob.size, speechWasDetected });
           resolve({ ok: false, reason: "silent" });
           return;
         }
@@ -485,6 +494,8 @@ export function useAIVoice() {
         try {
           const formData = new FormData();
           formData.append("audio", blob, "recording.webm");
+          const glossary = (options.glossary ?? []).filter((term) => term.trim().length > 0).slice(0, 160).join(", ");
+          if (glossary) formData.append("glossary", glossary);
           voiceLog("transcribe.request", { bytes: blob.size, mimeType: blob.type, chunks: chunks.length });
 
           const res = await fetchWithTimeout(`${BASE}/api/voice/transcribe`, {
