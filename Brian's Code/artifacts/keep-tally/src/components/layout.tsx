@@ -13,6 +13,7 @@ import {
   Map,
   Menu,
   Package,
+  ScanLine,
   Search,
   Settings,
   Users,
@@ -326,6 +327,9 @@ export function Layout({ children }: { children: ReactNode }) {
       section: "Field Work",
     },
     { path: "/route-sheets", label: "Route Sheets", icon: Map },
+    ...(hasPermission("scan_barcodes")
+      ? [{ path: "/scan", label: "Barcode Scanner", icon: ScanLine }]
+      : []),
     {
       path: "/agents",
       label: "Agent Insights",
