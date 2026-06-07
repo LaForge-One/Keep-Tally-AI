@@ -11,7 +11,6 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import {
   Warehouse,
-  Plus,
   Search,
   Download,
   Upload,
@@ -804,16 +803,6 @@ export default function WarehousePage() {
                 Tally
               </Button>
             )}
-            {canEditWarehouse && (
-              <Button
-                size="sm"
-                className="rounded-xl font-bold"
-                onClick={() => setShowNewDialog(true)}
-              >
-                <Plus className="w-4 h-4 mr-1" />
-                Add Item
-              </Button>
-            )}
           </div>
         </div>
 
@@ -960,15 +949,22 @@ export default function WarehousePage() {
               No warehouse items
             </p>
             <p className="text-sm text-muted-foreground mt-1">
-              Add items manually or import from CSV
+              Use Tally to add items by voice, or import from CSV.
             </p>
-            <Button
-              className="mt-4 rounded-xl"
-              onClick={() => setShowNewDialog(true)}
-            >
-              <Plus className="w-4 h-4 mr-2" />
-              Add First Item
-            </Button>
+            <div className="mt-4 flex flex-wrap justify-center gap-2">
+              {canUseVoice && (
+                <Button className="rounded-xl" onClick={() => navigate("/warehouse/voice")}>
+                  <Mic className="w-4 h-4 mr-2" />
+                  Open Tally
+                </Button>
+              )}
+              {canEditWarehouse && (
+                <Button variant={canUseVoice ? "outline" : "default"} className="rounded-xl" onClick={() => setShowImport(true)}>
+                  <Upload className="w-4 h-4 mr-2" />
+                  Import CSV
+                </Button>
+              )}
+            </div>
           </div>
         ) : (
           <div

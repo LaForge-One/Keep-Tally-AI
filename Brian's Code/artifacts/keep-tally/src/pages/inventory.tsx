@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useLocation as useWouterLocation } from "wouter";
 import { Layout } from "@/components/layout";
 import { PageHeader } from "@/components/page-header";
@@ -41,6 +41,13 @@ import { AdjustmentModal } from "@/components/adjustment-modal";
 import { InventoryScanner } from "@/components/inventory-scanner";
 import { toast } from "@/hooks/use-toast";
 import type { Item } from "@workspace/api-client-react";
+
+const STORE_ITEMS_PAGE_SIZE = 50;
+
+function isWarehouseLocation(location: string | null | undefined): boolean {
+  const normalized = (location ?? "").trim().toLowerCase();
+  return normalized === "warehouse" || normalized.endsWith(" warehouse");
+}
 
 function StockBadge({ quantity, minQuantity, maxQuantity }: { quantity: number; minQuantity: number; maxQuantity: number }) {
   if (quantity <= 0) {
@@ -89,6 +96,7 @@ export default function Inventory() {
   const [searchTerm, setSearchTerm] = useState("");
   const [filterCategory, setFilterCategory] = useState<string>("All");
   const [filterStatus, setFilterStatus] = useState<string>("All");
+  const [page, setPage] = useState(1);
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<Item | undefined>(undefined);
@@ -111,14 +119,16 @@ export default function Inventory() {
     },
   });
 
-  const categories = useMemo(() => {
-    if (!items) return ["All"];
-    return ["All", ...Array.from(new Set(items.map((i) => i.category))).sort()];
+  const storeItems = useMemo(() => {
+    return (items ?? []).filter((item) => !isWarehouseLocation(item.location));
   }, [items]);
 
+  const categories = useMemo(() => {
+    return ["All", ...Array.from(new Set(storeItems.map((i) => i.category))).sort()];
+  }, [storeItems]);
+
   const filteredItems = useMemo(() => {
-    if (!items) return [];
-    return items.filter((item) => {
+    return storeItems.filter((item) => {
       const matchesSearch =
         item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         item.category.toLowerCase().includes(searchTerm.toLowerCase());
@@ -130,15 +140,27 @@ export default function Inventory() {
         (filterStatus === "ok" && item.quantity >= item.minQuantity && (item.maxQuantity <= 0 || item.quantity <= item.maxQuantity));
       return matchesSearch && matchesCat && matchesStatus;
     });
-  }, [items, searchTerm, filterCategory, filterStatus]);
+  }, [storeItems, searchTerm, filterCategory, filterStatus]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredItems.length / STORE_ITEMS_PAGE_SIZE));
+  const pageStart = (page - 1) * STORE_ITEMS_PAGE_SIZE;
+  const pageItems = filteredItems.slice(pageStart, pageStart + STORE_ITEMS_PAGE_SIZE);
+
+  useEffect(() => {
+    setPage(1);
+  }, [selectedLocation, searchTerm, filterCategory, filterStatus]);
+
+  useEffect(() => {
+    setPage((current) => Math.min(current, totalPages));
+  }, [totalPages]);
 
   const openCreate = () => { setEditingItem(undefined); setDialogOpen(true); };
   const openEdit = (item: Item) => { setEditingItem(item); setDialogOpen(true); };
   const openAdjust = (item: Item) => { setAdjustingItem(item); setAdjustOpen(true); };
   const confirmDelete = (id: number) => { setItemToDelete(id); setDeleteConfirmOpen(true); };
 
-  const lowCount = items?.filter((i) => i.quantity > 0 && i.quantity < i.minQuantity).length ?? 0;
-  const outCount = items?.filter((i) => i.quantity <= 0).length ?? 0;
+  const lowCount = storeItems.filter((i) => i.quantity > 0 && i.quantity < i.minQuantity).length;
+  const outCount = storeItems.filter((i) => i.quantity <= 0).length;
 
   return (
     <Layout>
@@ -147,7 +169,7 @@ export default function Inventory() {
           title="Store Inventory"
           description={
             items
-              ? `${items.length} items · ${lowCount} low · ${outCount} out of stock`
+              ? `${storeItems.length} store items · ${lowCount} low · ${outCount} out of stock`
               : "Manage and track your products"
           }
           actions={
@@ -261,7 +283,7 @@ export default function Inventory() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredItems.map((item) => (
+                {pageItems.map((item) => (
                   <TableRow key={item.id} className="group">
                     <TableCell className="pl-4 font-medium">{item.name}</TableCell>
                     <TableCell className="text-muted-foreground text-sm">{item.category}</TableCell>
@@ -333,9 +355,35 @@ export default function Inventory() {
         </div>
 
         {!isLoading && filteredItems.length > 0 && (
-          <p className="text-xs text-muted-foreground text-right">
-            Showing {filteredItems.length} of {items?.length ?? 0} items
-          </p>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs text-muted-foreground">
+              Showing {pageStart + 1}-{Math.min(pageStart + STORE_ITEMS_PAGE_SIZE, filteredItems.length)} of {filteredItems.length} store items
+              {storeItems.length !== (items?.length ?? 0) ? ` (${(items?.length ?? 0) - storeItems.length} warehouse items hidden)` : ""}
+            </p>
+            {totalPages > 1 && (
+              <div className="flex items-center justify-end gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPage((current) => Math.max(1, current - 1))}
+                  disabled={page <= 1}
+                >
+                  Previous
+                </Button>
+                <span className="text-xs font-medium text-muted-foreground">
+                  Page {page} of {totalPages}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+                  disabled={page >= totalPages}
+                >
+                  Next
+                </Button>
+              </div>
+            )}
+          </div>
         )}
       </div>
 
