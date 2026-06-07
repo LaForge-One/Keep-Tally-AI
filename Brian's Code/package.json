@@ -10,6 +10,7 @@
     "smoke": "node scripts/dev-smoke.mjs",
     "audit:dev": "node scripts/vps-dev-surgical-audit.mjs",
     "workflow:test": "node scripts/dev-workflow-test.mjs",
+    "test:command-parser": "corepack pnpm --filter @workspace/scripts run test:command-parser",
     "test:voice-count": "corepack pnpm --filter @workspace/scripts run test:voice-count",
     "test:warehouse-voice-add-item": "corepack pnpm --filter @workspace/scripts run test:warehouse-voice-add-item",
     "test:mobile-scanner-risks": "corepack pnpm --filter @workspace/scripts run test:mobile-scanner-risks",

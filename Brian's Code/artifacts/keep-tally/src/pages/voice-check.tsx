@@ -319,7 +319,13 @@ async function parseWithAI(
   transcript: string,
   mode: "quantity" | "reason" | "custom",
   items: Item[],
-  opts?: { currentItemName?: string; currentParLevel?: number; currentMinQuantity?: number; currentMaxQuantity?: number },
+  opts?: {
+    currentItemName?: string;
+    currentParLevel?: number;
+    currentMinQuantity?: number;
+    currentMaxQuantity?: number;
+    sessionId?: number | null;
+  },
 ): Promise<GPTParseResult> {
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), 7000);
@@ -346,6 +352,7 @@ async function parseWithAI(
         currentParLevel: opts?.currentParLevel,
         currentMinQuantity: opts?.currentMinQuantity,
         currentMaxQuantity: opts?.currentMaxQuantity,
+        sessionId: opts?.sessionId ?? null,
       }),
     });
     if (!res.ok) throw new Error("parse failed");
@@ -933,6 +940,7 @@ export default function VoiceCheck() {
           currentParLevel: item.quantity,
           currentMinQuantity: item.minQuantity,
           currentMaxQuantity: item.maxQuantity,
+          sessionId: activeVoiceSessionIdRef.current,
         });
 
         if (aiQty.action === "skip") {
@@ -1062,7 +1070,9 @@ export default function VoiceCheck() {
           const reasonTranscript = await safeListen(12000);
           if (reasonTranscript === null) break itemLoop;
 
-          const aiReason = await parseWithAI(reasonTranscript || "", "reason", items);
+          const aiReason = await parseWithAI(reasonTranscript || "", "reason", items, {
+            sessionId: activeVoiceSessionIdRef.current,
+          });
           const reason = aiReason.action === "reason" ? aiReason.reason : parseReason(reasonTranscript || "");
           if (!(await confirmLargeChange(item, counted))) {
             setPendingCounted(null);
@@ -1208,7 +1218,9 @@ export default function VoiceCheck() {
           };
         } else {
           logVoiceStep("custom.match.ai-request", { transcript, commandTranscript });
-          aiCustom = await parseWithAI(commandTranscript, "custom", voiceCandidateItems(commandTranscript, sessionItems));
+          aiCustom = await parseWithAI(commandTranscript, "custom", voiceCandidateItems(commandTranscript, sessionItems), {
+            sessionId: activeVoiceSessionIdRef.current,
+          });
           logVoiceStep("custom.match.ai-response", aiCustom);
         }
 
@@ -1387,7 +1399,9 @@ export default function VoiceCheck() {
           const reasonTranscript = await safeListen(12000);
           if (reasonTranscript === null) break;
 
-          const aiReason = await parseWithAI(reasonTranscript || "", "reason", sessionItems);
+          const aiReason = await parseWithAI(reasonTranscript || "", "reason", sessionItems, {
+            sessionId: activeVoiceSessionIdRef.current,
+          });
           const reason = aiReason.action === "reason" ? aiReason.reason : parseReason(reasonTranscript || "");
           if (!(await confirmLargeChange(item, quantity))) {
             setPendingCounted(null);

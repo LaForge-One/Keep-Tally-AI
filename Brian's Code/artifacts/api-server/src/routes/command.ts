@@ -113,6 +113,30 @@ function canAccessItem(req: Request, item: ItemRow): boolean {
   return canAccessLocation(req, item.location);
 }
 
+function normalizeHint(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function itemMatchesCommandHints(item: ItemRow, locationHint: string | null, categoryHint: string | null): boolean {
+  if (locationHint) {
+    const itemLocation = normalizeHint(item.location);
+    const commandLocation = normalizeHint(locationHint);
+    if (!(itemLocation === commandLocation || itemLocation.includes(commandLocation) || commandLocation.includes(itemLocation))) {
+      return false;
+    }
+  }
+
+  if (categoryHint) {
+    const itemCategory = normalizeHint(item.category);
+    const commandCategory = normalizeHint(categoryHint);
+    if (!(itemCategory === commandCategory || itemCategory.includes(commandCategory) || commandCategory.includes(itemCategory))) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 async function resolveLocationByName(
   req: Request,
   res: Response,
@@ -149,9 +173,10 @@ router.post("/command", async (req, res) => {
     return;
   }
 
+  const commandItems = await loadCommandItems(req);
   let cmd;
   try {
-    cmd = await parseCommand(text);
+    cmd = await parseCommand(text, commandItems);
   } catch (err) {
     req.log.error({ err }, "Command parsing failed");
     res.status(200).json({
@@ -237,6 +262,12 @@ router.post("/command", async (req, res) => {
     cmd.kind === "delete" ? cmd.itemHint : "itemHint" in cmd ? cmd.itemHint : "";
   const locationHint =
     "locationHint" in cmd ? cmd.locationHint ?? null : null;
+  const categoryHint =
+    "categoryHint" in cmd ? cmd.categoryHint ?? null : null;
+  const matchedItemId =
+    "matchedItemId" in cmd && Number.isInteger(cmd.matchedItemId)
+      ? cmd.matchedItemId
+      : null;
 
   if (cmd.kind === "delete") {
     if (!hasPermission(req, "delete_items")) {
@@ -255,7 +286,10 @@ router.post("/command", async (req, res) => {
     if (!resolvedLocation) return;
   }
 
-  const target = findBestItem(await loadCommandItems(req), itemHint, locationHint);
+  const matchedTarget = matchedItemId
+    ? commandItems.find((item) => item.id === matchedItemId && itemMatchesCommandHints(item, locationHint, categoryHint)) ?? null
+    : null;
+  const target = matchedTarget ?? findBestItem(commandItems, itemHint, locationHint, categoryHint);
 
   if (!target) {
     res.json({

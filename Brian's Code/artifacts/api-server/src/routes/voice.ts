@@ -477,6 +477,7 @@ const ParseSchema = z.object({
   transcript: z.string(),
   items: z.array(ItemSchema),
   mode: z.enum(["quantity", "reason", "custom"]).default("custom"),
+  sessionId: z.number().int().positive().nullable().optional(),
   currentItemName: z.string().optional(),
   currentParLevel: z.number().optional(),
   currentMinQuantity: z.number().optional(),
@@ -778,7 +779,23 @@ function canAccessItem(req: Request, item: ItemRow): boolean {
   return canAccessLocation(req, item.location);
 }
 
-async function filterAllowedVoiceItems(req: Request, items: z.infer<typeof ItemSchema>[]) {
+function normalizeLocationName(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+type VoiceSessionRow = NonNullable<Awaited<ReturnType<typeof findAccountSession>>>;
+
+function itemMatchesVoiceSession(item: ItemRow, session: VoiceSessionRow) {
+  if (session.locationId !== null) return item.locationId === session.locationId;
+  if (!session.locationName) return true;
+  return normalizeLocationName(item.location) === normalizeLocationName(session.locationName);
+}
+
+async function filterAllowedVoiceItems(
+  req: Request,
+  items: z.infer<typeof ItemSchema>[],
+  session: VoiceSessionRow | null = null,
+) {
   if (items.length === 0) return [];
 
   const itemIds = [...new Set(items.map((item) => item.id))];
@@ -789,6 +806,7 @@ async function filterAllowedVoiceItems(req: Request, items: z.infer<typeof ItemS
   const allowedIds = new Set(
     rows
       .filter((item) => canAccessItem(req, item))
+      .filter((item) => (session ? itemMatchesVoiceSession(item, session) : true))
       .map((item) => item.id),
   );
 
@@ -937,6 +955,7 @@ router.post("/voice/parse", async (req: Request, res: Response) => {
     transcript,
     items,
     mode,
+    sessionId,
     currentItemName,
     currentParLevel,
     currentMinQuantity,
@@ -950,9 +969,16 @@ router.post("/voice/parse", async (req: Request, res: Response) => {
   }
 
   try {
+    const session = sessionId ? await findAccountSession(req, sessionId) : null;
+    if (sessionId && !session) {
+      res.status(404).json({ error: "Voice count session not found", requestId: req.id });
+      return;
+    }
+
     logger.info({
       requestId: req.id,
       mode,
+      sessionId: session?.id ?? null,
       itemCount: items.length,
       transcriptLength: transcript.length,
     }, "Voice parse requested");
@@ -972,8 +998,15 @@ router.post("/voice/parse", async (req: Request, res: Response) => {
       return;
     }
 
-    const allowedItems = mode === "custom" ? await filterAllowedVoiceItems(req, items) : items;
-    logger.info({ requestId: req.id, mode, allowedItemCount: allowedItems.length }, "Voice parse allowed items loaded");
+    const allowedItems = mode === "custom" ? await filterAllowedVoiceItems(req, items, session) : items;
+    logger.info({
+      requestId: req.id,
+      mode,
+      sessionId: session?.id ?? null,
+      sessionLocationId: session?.locationId ?? null,
+      sessionLocationName: session?.locationName ?? null,
+      allowedItemCount: allowedItems.length,
+    }, "Voice parse allowed items loaded");
     const prompt = buildPrompt(
       transcript,
       mode,
