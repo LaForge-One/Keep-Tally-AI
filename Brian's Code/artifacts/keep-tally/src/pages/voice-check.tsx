@@ -705,6 +705,23 @@ export default function VoiceCheck() {
     }
   }, [logVoiceStep]);
 
+  const resetVoiceRunState = useCallback(() => {
+    resetVoiceSession();
+    controlRef.current = { shouldStop: false, shouldSkip: false, shouldRepeat: false, shouldPause: false };
+    isRunningRef.current = false;
+    currentIndexRef.current = 0;
+    silentListenAttemptsRef.current = 0;
+    activeVoiceSessionIdRef.current = null;
+    confirmationResolverRef.current?.("no");
+    confirmationResolverRef.current = null;
+    setActiveVoiceSessionId(null);
+    setVoiceCapture(null);
+    setPendingConfirmation(null);
+    setPendingCounted(null);
+    setCustomMatchedItem(null);
+    setCustomSpokenQty(null);
+  }, [resetVoiceSession]);
+
   /* ── Voice helpers ── */
   const safeSpeak = useCallback(async (text: string, opts: { audible?: boolean } = {}): Promise<boolean> => {
     if (controlRef.current.shouldStop || controlRef.current.shouldPause) return false;
@@ -1543,12 +1560,11 @@ export default function VoiceCheck() {
       return;
     }
 
-    resetVoiceSession();
+    resetVoiceRunState();
     sessionResultsRef.current = [];
     setSessionResults([]);
     setResultsPage(1);
     setVoiceDebugEntries([]);
-    silentListenAttemptsRef.current = 0;
     logVoiceStep("start.clicked", {
       countMode,
       location: sessionLocation,
@@ -1599,7 +1615,7 @@ export default function VoiceCheck() {
     items,
     micPrecheck,
     runMicPrecheck,
-    resetVoiceSession,
+    resetVoiceRunState,
     logVoiceStep,
     sessionLocation,
   ]);
@@ -1660,6 +1676,7 @@ export default function VoiceCheck() {
   }, [cancelAll, releaseWakeLock]);
 
   const resetSession = useCallback(() => {
+    resetVoiceRunState();
     setPhase("setup");
     setCountMode("custom");
     setSelectedCategory("");
@@ -1667,16 +1684,11 @@ export default function VoiceCheck() {
     sessionResultsRef.current = [];
     setResultsPage(1);
     setCurrentIndex(0);
-    setPendingCounted(null);
     setQueuedItems([]);
-    setCustomMatchedItem(null);
-    setCustomSpokenQty(null);
     setVoiceNotice("");
-    setVoiceCapture(null);
-    setPendingConfirmation(null);
-    confirmationResolverRef.current?.("no");
-    confirmationResolverRef.current = null;
-  }, []);
+    setStatusMessage("");
+    setLastHeard("");
+  }, [resetVoiceRunState]);
 
   /* ── Derived state ── */
   const isCustomMode = countMode === "custom";
@@ -2188,11 +2200,11 @@ export default function VoiceCheck() {
           <div>
             <h1 className="text-3xl font-extrabold tracking-tight flex items-center gap-2">
               <Mic className="w-7 h-7 text-primary" />
-              Count Mode
+              Tally Up
             </h1>
             <p className="text-muted-foreground mt-0.5 text-sm">
               {phase === "setup" && "Pick a location once, then start a continuous Tally session."}
-              {phase === "select-mode" && "Optional structured count modes."}
+              {phase === "select-mode" && "Optional structured Tally Up modes."}
               {phase === "complete" && "Session complete."}
             </p>
           </div>
@@ -2323,7 +2335,7 @@ export default function VoiceCheck() {
                     <span className="ml-1">items at {sessionLocation}</span>
                   </>
                 ) : (
-                  <span>No items found at {sessionLocation}. You can still continue to review count options.</span>
+                  <span>No items found at {sessionLocation}. You can still continue to review tally options.</span>
                 )}
               </div>
             )}
@@ -2344,7 +2356,7 @@ export default function VoiceCheck() {
               disabled={!sessionLocation || locationsLoading || itemsLoading}
               onClick={() => setPhase("select-mode")}
             >
-              Structured count options
+              Structured tally options
               <ChevronRight className="w-4 h-4 ml-1" />
             </Button>
 
@@ -2356,7 +2368,7 @@ export default function VoiceCheck() {
           </div>
         )}
 
-        {/* ── STEP 2: Count Mode Selection ── */}
+        {/* ── STEP 2: Tally Up Mode Selection ── */}
         {phase === "select-mode" && (
           <div className="space-y-4 max-w-md mx-auto">
             {!hasItems && !itemsLoading && (
