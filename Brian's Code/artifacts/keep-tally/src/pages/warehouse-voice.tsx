@@ -1,7 +1,16 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { useLocation } from "wouter";
 import { Layout } from "@/components/layout";
+import { useAuth } from "@/contexts/auth-context";
 import { useVoice, getVoiceSupport } from "@/hooks/use-voice";
+import {
+  buildWarehouseItemCreatePayloadFromVoiceDraft,
+  isCompleteWarehouseVoiceAddItemDraft,
+  parseWarehouseVoiceAddItemConfirmation,
+  warehouseVoiceAddItemDraftSummary,
+  type WarehouseVoiceAddItemDraft,
+  type WarehouseVoiceAddItemDraftResponse,
+} from "@/lib/warehouse-voice-add-item";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -24,6 +33,7 @@ import {
   Volume2,
   ArrowLeft,
   Warehouse,
+  PackagePlus,
   Wand2,
   TrendingDown,
   Tag,
@@ -202,6 +212,7 @@ const MODE_ICONS: Record<CountMode, React.ReactNode> = {
 
 export default function WarehouseVoice() {
   const [, navigate] = useLocation();
+  const { hasPermission } = useAuth();
   const { speak, cancelSpeech, listen, stopListening, cancelAll } = useVoice();
   const voiceSupport = getVoiceSupport();
 
@@ -217,6 +228,9 @@ export default function WarehouseVoice() {
 
   const [aiMatchedItem, setAiMatchedItem] = useState<WarehouseItem | null>(null);
   const [aiSpokenQty, setAiSpokenQty] = useState<number | null>(null);
+  const [selectedWarehouse, setSelectedWarehouse] = useState("default");
+  const [warehouseAddItemDraft, setWarehouseAddItemDraft] = useState<WarehouseVoiceAddItemDraftResponse | null>(null);
+  const [warehouseAddItemBusy, setWarehouseAddItemBusy] = useState(false);
 
   const controlRef = useRef({ shouldStop: false, shouldSkip: false, shouldRepeat: false, shouldPause: false });
   const currentIndexRef = useRef(0);
@@ -404,6 +418,105 @@ export default function WarehouseVoice() {
       setPhase("complete");
     }
   }, [safeSpeak, safeListen, addResult, speak, acquireWakeLock, releaseWakeLock]);
+
+  const createWarehouseItemFromVoiceDraft = useCallback(async (draft: WarehouseVoiceAddItemDraft): Promise<WarehouseItem> => {
+    const res = await fetch(`${BASE}/api/warehouse`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(buildWarehouseItemCreatePayloadFromVoiceDraft(draft)),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json() as Promise<WarehouseItem>;
+  }, []);
+
+  const handleWarehouseVoiceAddItem = useCallback(async () => {
+    if (isRunningRef.current || warehouseAddItemBusy) return;
+
+    if (!hasPermission("edit_warehouse")) {
+      setStatusMessage("You do not have permission to add warehouse items.");
+      return;
+    }
+
+    isRunningRef.current = true;
+    setWarehouseAddItemBusy(true);
+    setWarehouseAddItemDraft(null);
+    setLastHeard("");
+    controlRef.current = { shouldStop: false, shouldSkip: false, shouldRepeat: false, shouldPause: false };
+
+    try {
+      await acquireWakeLock();
+      setPhase("custom-listening");
+      await safeSpeak("Tell me the new warehouse item name, category, quantity, minimum, maximum, and optional barcode.");
+
+      const transcript = await safeListen(22000);
+      if (transcript === null || !transcript.trim()) {
+        await safeSpeak("I did not catch the new warehouse item details. Try add item by voice again.");
+        setPhase("setup");
+        return;
+      }
+
+      setStatusMessage("Building warehouse item draft...");
+      const draftRes = await fetch(`${BASE}/api/voice/warehouse/add-item/draft`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ transcript }),
+      });
+      if (!draftRes.ok) throw new Error(await draftRes.text());
+
+      const draftData = (await draftRes.json()) as WarehouseVoiceAddItemDraftResponse;
+      setWarehouseAddItemDraft(draftData);
+
+      if (draftData.status !== "draft" || !isCompleteWarehouseVoiceAddItemDraft(draftData.draft)) {
+        const message = draftData.nextQuestion ?? "The warehouse item draft is missing required details. Please try again with name, category, quantity, minimum, and maximum.";
+        setStatusMessage(message);
+        await safeSpeak(message);
+        setPhase("setup");
+        return;
+      }
+
+      const summary = warehouseVoiceAddItemDraftSummary(draftData.draft);
+      const confirmMessage = `I heard ${summary}. Say confirm to create it in warehouse inventory, or no to cancel.`;
+      setStatusMessage(confirmMessage);
+      await safeSpeak(confirmMessage);
+
+      const confirmationTranscript = await safeListen(12000);
+      const confirmation = confirmationTranscript ? parseWarehouseVoiceAddItemConfirmation(confirmationTranscript) : "unknown";
+      if (confirmation !== "yes") {
+        const message = confirmation === "no"
+          ? "Okay, warehouse item was not created."
+          : "I could not confirm that, so I did not create the warehouse item.";
+        setStatusMessage(message);
+        await safeSpeak(message);
+        setPhase("setup");
+        return;
+      }
+
+      const created = await createWarehouseItemFromVoiceDraft(draftData.draft);
+      await refetchWarehouse();
+      const successMessage = `Created ${created.name} in warehouse inventory with quantity ${created.quantity}.`;
+      setStatusMessage(successMessage);
+      await safeSpeak(successMessage);
+      setPhase("setup");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Could not add that warehouse item by voice.";
+      setStatusMessage(`Voice add item failed. ${message}`);
+      await safeSpeak("Could not add that warehouse item by voice. Check the details and try again.");
+      setPhase("setup");
+    } finally {
+      isRunningRef.current = false;
+      setWarehouseAddItemBusy(false);
+      releaseWakeLock();
+    }
+  }, [
+    warehouseAddItemBusy,
+    hasPermission,
+    acquireWakeLock,
+    safeSpeak,
+    safeListen,
+    createWarehouseItemFromVoiceDraft,
+    refetchWarehouse,
+    releaseWakeLock,
+  ]);
 
   /* ── Build queue & start ── */
   const buildQueue = useCallback((): WarehouseItem[] => {
@@ -872,6 +985,71 @@ export default function WarehouseVoice() {
             </div>
 
             <div className="space-y-3">
+              <div className="rounded-xl border border-border bg-background p-4 space-y-3">
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary shrink-0">
+                    <PackagePlus className="w-5 h-5" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-bold text-sm">Add Warehouse Item by Voice</p>
+                    <p className="text-xs text-muted-foreground">
+                      Create new inventory in the warehouse first. Store locations receive it later by transfer.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold text-muted-foreground">Warehouse</label>
+                  <Select value={selectedWarehouse} onValueChange={setSelectedWarehouse}>
+                    <SelectTrigger className="rounded-xl">
+                      <SelectValue placeholder="Select warehouse" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="default">Main Warehouse</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {warehouseAddItemDraft && (
+                  <div className="rounded-xl border border-border bg-muted/30 p-3 text-xs space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-bold uppercase tracking-wide text-foreground">Latest warehouse draft</span>
+                      <span className={warehouseAddItemDraft.status === "draft" ? "text-emerald-600" : "text-amber-600"}>
+                        {warehouseAddItemDraft.status === "draft" ? "Ready" : "Needs details"}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-muted-foreground">
+                      <span>Name: <strong className="text-foreground">{warehouseAddItemDraft.draft.name ?? "Missing"}</strong></span>
+                      <span>Category: <strong className="text-foreground">{warehouseAddItemDraft.draft.category ?? "Missing"}</strong></span>
+                      <span>Qty: <strong className="text-foreground">{warehouseAddItemDraft.draft.quantity ?? "Missing"}</strong></span>
+                      <span>Min/Max: <strong className="text-foreground">{warehouseAddItemDraft.draft.minQuantity ?? "?"}/{warehouseAddItemDraft.draft.maxQuantity ?? "?"}</strong></span>
+                      <span className="col-span-2">Barcode: <strong className="text-foreground">{warehouseAddItemDraft.draft.barcode ?? "Optional"}</strong></span>
+                    </div>
+                    {warehouseAddItemDraft.warnings.length > 0 && (
+                      <p className="text-amber-700 dark:text-amber-300">{warehouseAddItemDraft.warnings.join(" ")}</p>
+                    )}
+                  </div>
+                )}
+
+                {statusMessage && !isActive && phase === "setup" && (
+                  <p className="rounded-xl bg-muted/40 px-3 py-2 text-xs text-muted-foreground">{statusMessage}</p>
+                )}
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full h-12 rounded-xl font-bold"
+                  disabled={warehouseAddItemBusy || !hasPermission("edit_warehouse") || selectedWarehouse !== "default"}
+                  onClick={handleWarehouseVoiceAddItem}
+                >
+                  <PackagePlus className="w-4 h-4 mr-2" />
+                  {warehouseAddItemBusy ? "Listening for Warehouse Item..." : "Add Warehouse Item by Voice"}
+                </Button>
+                {!hasPermission("edit_warehouse") && (
+                  <p className="text-xs text-muted-foreground">You need warehouse edit permission to create warehouse items.</p>
+                )}
+              </div>
+
               {(["all", "low-stock", "category", "ai"] as CountMode[]).map((mode) => (
                 <button
                   key={mode}

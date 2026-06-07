@@ -35,7 +35,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import type { Item } from "@workspace/api-client-react";
-import { parseVoiceCountConfirmation } from "@/lib/voice-count-workflow";
+import { parseSpokenNumber, parseVoiceCountConfirmation, parseVoiceInventoryCommand } from "@/lib/voice-count-workflow";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const LARGE_DELTA_MULTIPLIER = 2;
@@ -60,6 +60,7 @@ type Phase =
   | "complete";
 
 type CountMode = "all" | "low-stock" | "category" | "custom";
+type VoiceSessionMode = CountMode;
 
 type ResultStatus = "verified" | "updated-lower" | "updated-higher" | "skipped" | "no-response";
 type ConfirmationChoice = "yes" | "no";
@@ -106,21 +107,6 @@ const WORD_MAP: Record<string, number> = {
   sixty: 60, seventy: 70, eighty: 80, ninety: 90, hundred: 100,
 };
 
-function wordToNumber(text: string): number | null {
-  const words = text.replace(/-/g, " ").split(/\s+/);
-  for (let idx = 0; idx < words.length; idx++) {
-    const w = words[idx]!;
-    if (WORD_MAP[w] !== undefined) {
-      const next = words[idx + 1];
-      if (next && WORD_MAP[next] !== undefined && WORD_MAP[w]! >= 20 && WORD_MAP[next]! < 10) {
-        return WORD_MAP[w]! + WORD_MAP[next]!;
-      }
-      return WORD_MAP[w]!;
-    }
-  }
-  return null;
-}
-
 function parseQuantity(transcript: string, expected: number): { isVerified: boolean; quantity: number | null } {
   const t = transcript.toLowerCase().trim();
   if (!t) return { isVerified: false, quantity: null };
@@ -129,7 +115,7 @@ function parseQuantity(transcript: string, expected: number): { isVerified: bool
   }
   const digitMatch = t.match(/\b(\d+)\b/);
   if (digitMatch) return { isVerified: false, quantity: parseInt(digitMatch[1]!, 10) };
-  const wordNum = wordToNumber(t);
+  const wordNum = parseSpokenNumber(t);
   if (wordNum !== null) return { isVerified: false, quantity: wordNum };
   return { isVerified: false, quantity: null };
 }
@@ -161,11 +147,6 @@ function isCompletionOnlyCommand(transcript: string): boolean {
 }
 
 /* ── Item name + quantity parser for voice-driven custom mode ─────── */
-
-type ItemMatch =
-  | { status: "match"; item: Item; score: number }
-  | { status: "ambiguous"; candidates: Item[] }
-  | { status: "none" };
 
 type IndexedVoiceItem = {
   item: Item;
@@ -217,61 +198,11 @@ function rankItemMatches(query: string, items: Item[]): Array<{ item: Item; scor
   return ranked.sort((a, b) => b.score - a.score);
 }
 
-function findBestItemMatch(query: string, items: Item[]): ItemMatch {
-  const ranked = rankItemMatches(query, items);
-  const [best, second] = ranked;
-  if (!best) return { status: "none" };
-
-  const closeSecond = second && second.score >= Math.max(40, best.score - 12);
-  if (closeSecond && best.score < 90) {
-    return { status: "ambiguous", candidates: ranked.slice(0, 3).map((match) => match.item) };
-  }
-
-  return { status: "match", item: best.item, score: best.score };
-}
-
 function parseVoiceCommand(transcript: string, items: Item[]): { item: Item; quantity: number } | { ambiguous: Item[] } | null {
-  const t = transcript.toLowerCase().trim();
-
-  let quantity: number | null = null;
-  let nameText = t;
-
-  // Number at end: "coke zero 5"
-  const digitEnd = t.match(/^(.*?)\s+(\d+)\s*$/);
-  if (digitEnd) {
-    quantity = parseInt(digitEnd[2]!, 10);
-    nameText = digitEnd[1]!.trim();
-  }
-
-  // Word number at end: "coke zero five"
-  if (quantity === null) {
-    const words = t.split(/\s+/);
-    for (let i = words.length - 1; i >= 0; i--) {
-      const w = words[i]!;
-      if (WORD_MAP[w] !== undefined) {
-        quantity = WORD_MAP[w]!;
-        nameText = [...words.slice(0, i), ...words.slice(i + 1)].join(" ").trim();
-        break;
-      }
-    }
-  }
-
-  // Number at start: "5 coke zero"
-  if (quantity === null) {
-    const digitStart = t.match(/^(\d+)\s+(.+)$/);
-    if (digitStart) {
-      quantity = parseInt(digitStart[1]!, 10);
-      nameText = digitStart[2]!.trim();
-    }
-  }
-
-  if (quantity === null) return null;
-
-  const match = findBestItemMatch(nameText, items);
-  if (match.status === "none") return null;
-  if (match.status === "ambiguous") return { ambiguous: match.candidates };
-
-  return { item: match.item, quantity };
+  const result = parseVoiceInventoryCommand(transcript, items);
+  if (result.status === "none") return null;
+  if (result.status === "ambiguous") return { ambiguous: result.candidates };
+  return { item: result.item, quantity: result.quantity };
 }
 
 function voiceCandidateItems(transcript: string, items: Item[]): Item[] {
@@ -320,8 +251,34 @@ type GPTParseResult =
   | { action: "skip" }
   | { action: "done" }
   | { action: "reason"; reason: string }
-  | { action: "custom"; itemId: number; itemName: string; quantity: number }
+  | { action: "custom"; itemId: number; itemName: string; quantity: number; confidence?: number; alternates?: Array<{ itemId: number; itemName: string; confidence: number }> }
+  | { action: "clarify"; candidates: Array<{ itemId: number; itemName: string; confidence: number }> }
   | { action: "unknown" };
+
+function buildVoiceAliases(item: Item): string[] {
+  const aliases = new Set<string>();
+  const name = item.name.toLowerCase();
+  aliases.add(name);
+  aliases.add(name.replace(/\b20\s*oz\b/g, "twenty ounce"));
+  aliases.add(name.replace(/\b12\s*oz\b/g, "twelve ounce"));
+  aliases.add(name.replace(/\b8\.?4?\s*oz\b/g, "eight ounce"));
+  aliases.add(name.replace(/\bcoke zero\b/g, "zero coke"));
+  aliases.add(name.replace(/\bred bull\b/g, "redbull"));
+  if (item.category) aliases.add(item.category.toLowerCase());
+  if (item.barcode) aliases.add(item.barcode);
+  return Array.from(aliases).filter((alias) => alias.trim().length > 1).slice(0, 8);
+}
+
+function buildVoiceGlossary(items: readonly Item[]): string[] {
+  const terms = new Set<string>();
+  for (const item of items.slice(0, 80)) {
+    terms.add(item.name);
+    if (item.category) terms.add(item.category);
+    if (item.barcode) terms.add(item.barcode);
+    for (const alias of buildVoiceAliases(item)) terms.add(alias);
+  }
+  return Array.from(terms).filter((term) => term.trim().length > 1).slice(0, 160);
+}
 
 async function parseWithAI(
   transcript: string,
@@ -343,6 +300,9 @@ async function parseWithAI(
         items: items.slice(0, 80).map((it) => ({
           id: it.id,
           name: it.name,
+          category: it.category,
+          barcode: it.barcode ?? null,
+          aliases: buildVoiceAliases(it),
           parLevel: it.parLevel,
           minQuantity: it.minQuantity,
           maxQuantity: it.maxQuantity,
@@ -374,6 +334,18 @@ async function parseWithAI(
           itemId: fallback.item.id,
           itemName: fallback.item.name,
           quantity: fallback.quantity,
+          confidence: Math.round(fallback.score),
+          alternates: [],
+        };
+      }
+      if (fallback && "ambiguous" in fallback) {
+        return {
+          action: "clarify",
+          candidates: fallback.ambiguous.map((item) => ({
+            itemId: item.id,
+            itemName: item.name,
+            confidence: 0,
+          })),
         };
       }
     }
@@ -588,7 +560,7 @@ export default function VoiceCheck() {
     setVoiceDebugEntries((current) => [entry, ...current].slice(0, 12));
   }, []);
 
-  const startVoiceAuditSession = useCallback(async (mode: CountMode, itemCount: number): Promise<number | null> => {
+  const startVoiceAuditSession = useCallback(async (mode: VoiceSessionMode, itemCount: number): Promise<number | null> => {
     try {
       const location = locationOptions.find((option) => option.name === sessionLocation);
       const res = await fetch(`${BASE}/api/voice/sessions`, {
@@ -699,7 +671,7 @@ export default function VoiceCheck() {
     return !controlRef.current.shouldStop && !controlRef.current.shouldPause;
   }, [logVoiceStep, speak, speakBrowser]);
 
-  const safeListen = useCallback(async (timeoutMs: number): Promise<string | null> => {
+  const safeListen = useCallback(async (timeoutMs: number, glossary: readonly string[] = []): Promise<string | null> => {
     if (controlRef.current.shouldStop || controlRef.current.shouldPause) return null;
     vibrate([50, 30, 50]);
     setVoiceCapture({ state: "requesting-microphone" });
@@ -710,24 +682,39 @@ export default function VoiceCheck() {
       if (progress.state === "requesting-microphone") {
         setStatusMessage("Opening microphone...");
         logVoiceStep("listen.microphone-opening");
+      } else if (progress.state === "calibrating") {
+        setStatusMessage("Calibrating microphone...");
+        const now = Date.now();
+        if (now - lastVoiceLevelLogAtRef.current > 1500) {
+          lastVoiceLevelLogAtRef.current = now;
+          logVoiceStep("listen.calibrating", {
+            level: progress.level,
+            noiseFloor: Math.round(progress.noiseFloor),
+          });
+        }
       } else if (progress.state === "recording") {
-        setStatusMessage("Recording voice...");
+        setStatusMessage(progress.speechDetected ? "Recording voice..." : "Listening for speech...");
         const now = Date.now();
         if (progress.level > 0 && now - lastVoiceLevelLogAtRef.current > 1500) {
           lastVoiceLevelLogAtRef.current = now;
-          logVoiceStep("listen.recording", { level: progress.level });
+          logVoiceStep("listen.recording", {
+            level: progress.level,
+            speechDetected: progress.speechDetected,
+            noiseFloor: Math.round(progress.noiseFloor),
+            threshold: Math.round(progress.threshold),
+          });
         }
       } else if (progress.state === "transcribing") {
         setStatusMessage("Transcribing audio...");
         logVoiceStep("transcribe.start");
       }
-    });
+    }, { glossary });
     setVoiceCapture(null);
     if (controlRef.current.shouldStop || controlRef.current.shouldPause) return null;
     if (controlRef.current.shouldSkip || controlRef.current.shouldRepeat) return "";
     if (!result.ok) {
       const message = listenMessage(result);
-      logVoiceStep("listen.failed", { reason: result.reason, message });
+      logVoiceStep("listen.failed", { reason: result.reason, message, diagnostics: result.diagnostics });
       if (message) {
         setVoiceNotice(message);
         setStatusMessage(message);
@@ -742,6 +729,7 @@ export default function VoiceCheck() {
         eventType: "transcription_failed",
         status: result.reason,
         message,
+        metadata: result.diagnostics ?? {},
       });
       if (result.reason !== "silent") {
         controlRef.current.shouldPause = true;
@@ -754,11 +742,12 @@ export default function VoiceCheck() {
     setVoiceNotice("");
     setLastHeard(transcript || "");
     setStatusMessage(transcript ? `Heard "${transcript}".` : "No speech was transcribed.");
-    logVoiceStep("transcribe.success", { transcript });
+    logVoiceStep("transcribe.success", { transcript, diagnostics: result.diagnostics });
     await logVoiceAuditEvent({
       eventType: "transcript_received",
       status: transcript ? "transcribed" : "empty",
       transcript,
+      metadata: result.diagnostics ?? {},
     });
     return transcript;
   }, [listenDetailed, logVoiceAuditEvent, logVoiceStep]);
@@ -885,7 +874,7 @@ export default function VoiceCheck() {
 
         setPhase("listening");
         setLastHeard("");
-        const transcript = await safeListen(9000);
+        const transcript = await safeListen(9000, buildVoiceGlossary([item]));
         if (transcript === null) break itemLoop;
 
         if (controlRef.current.shouldSkip) {
@@ -1111,7 +1100,7 @@ export default function VoiceCheck() {
         setCustomSpokenQty(null);
 
         // Long listen window — user initiates each entry
-        const transcript = await safeListen(20000);
+        const transcript = await safeListen(20000, buildVoiceGlossary(sessionItems));
 
         if (transcript === null) {
           logVoiceStep("custom.listen.returned-null");
@@ -1183,6 +1172,25 @@ export default function VoiceCheck() {
           break;
         }
 
+        if (aiCustom.action === "clarify") {
+          const candidates = aiCustom.candidates.map((candidate) => candidate.itemName).join(", ");
+          logVoiceStep("custom.match.needs-clarification", { transcript, commandTranscript, candidates });
+          const message = candidates
+            ? `I heard "${commandTranscript}", but I need more detail. Did you mean ${candidates}? Please say the full item name and count.`
+            : `I heard "${commandTranscript}", but I need more detail. Please say the full item name and count.`;
+          setVoiceNotice(message);
+          setStatusMessage(message);
+          await logVoiceAuditEvent({
+            eventType: "item_match_needs_clarification",
+            action: "clarify",
+            transcript: commandTranscript,
+            message,
+            metadata: { candidates: aiCustom.candidates },
+          });
+          await safeSpeak(message);
+          continue;
+        }
+
         if (aiCustom.action !== "custom") {
           logVoiceStep("custom.match.failed", { transcript, commandTranscript, action: aiCustom.action });
           const message = `I heard "${commandTranscript}", but I could not match that to an item and count in ${sessionLocation ?? "this location"}. Try the full item name plus a number.`;
@@ -1217,7 +1225,7 @@ export default function VoiceCheck() {
         }
 
         const quantity = aiCustom.quantity;
-        logVoiceStep("custom.match.confirmed", { item: item.name, quantity, systemQuantity: item.quantity });
+        logVoiceStep("custom.match.confirmed", { item: item.name, quantity, systemQuantity: item.quantity, confidence: aiCustom.confidence, alternates: aiCustom.alternates });
         await logVoiceAuditEvent({
           eventType: "item_matched",
           item,
@@ -1225,6 +1233,8 @@ export default function VoiceCheck() {
           expectedQuantity: item.quantity,
           countedQuantity: quantity,
           transcript: commandTranscript,
+          confidence: aiCustom.confidence ?? null,
+          metadata: { alternates: aiCustom.alternates ?? [] },
         });
         setCustomMatchedItem(item);
         setCustomSpokenQty(quantity);
@@ -1583,12 +1593,17 @@ export default function VoiceCheck() {
   const voiceCaptureLabel =
     voiceCapture?.state === "requesting-microphone"
       ? "Opening microphone..."
+      : voiceCapture?.state === "calibrating"
+      ? "Calibrating microphone..."
       : voiceCapture?.state === "recording"
-      ? "Recording voice..."
+      ? voiceCapture.speechDetected
+        ? "Recording voice..."
+        : "Listening for speech..."
       : voiceCapture?.state === "transcribing"
       ? "Transcribing audio..."
       : "";
-  const voiceCaptureLevel = voiceCapture?.state === "recording" ? voiceCapture.level : 0;
+  const voiceCaptureLevel =
+    voiceCapture?.state === "recording" || voiceCapture?.state === "calibrating" ? voiceCapture.level : 0;
 
   const showOverlay = (isActive || phase === "paused") && (isCustomMode || !!currentItem);
 
@@ -1746,10 +1761,12 @@ export default function VoiceCheck() {
                     </div>
                     <div className="text-center">
                       <p className="text-lg font-black text-primary">{voiceCaptureLabel || "Listening..."}</p>
-                      {voiceCapture?.state === "recording" && (
+                      {(voiceCapture?.state === "recording" || voiceCapture?.state === "calibrating") && (
                         <div className="mt-2 w-48 h-2 rounded-full bg-muted overflow-hidden">
                           <div
-                            className="h-full rounded-full bg-primary transition-[width] duration-100"
+                            className={`h-full rounded-full transition-[width] duration-100 ${
+                              voiceCapture.state === "calibrating" ? "bg-amber-500" : "bg-primary"
+                            }`}
                             style={{ width: `${Math.max(6, voiceCaptureLevel)}%` }}
                           />
                         </div>
@@ -1760,6 +1777,8 @@ export default function VoiceCheck() {
                         <p className="text-xs text-muted-foreground mt-1">
                           {voiceCapture?.state === "transcribing"
                             ? "Processing what you said"
+                            : voiceCapture?.state === "calibrating"
+                            ? "Measuring room noise so the app can stop at the right time"
                             : "Say an item name and count, or say \"done\" to finish"}
                         </p>
                       )}

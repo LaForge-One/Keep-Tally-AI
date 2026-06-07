@@ -8,6 +8,7 @@
     "seed": "tsx ./src/seed.ts",
     "create-admin-user": "tsx ./src/create-admin-user.ts",
     "test:voice-count": "tsx --test ./src/voice-count-regression.test.ts",
+    "test:warehouse-voice-add-item": "tsx --test ./src/warehouse-voice-add-item-regression.test.ts",
     "test:mobile-scanner-risks": "tsx --test ./src/mobile-native-scanner-risk.test.ts",
     "deploy:preflight": "tsx ./src/deploy-preflight.ts",
     "reset-admin-password": "tsx ./src/reset-admin-password.ts",
