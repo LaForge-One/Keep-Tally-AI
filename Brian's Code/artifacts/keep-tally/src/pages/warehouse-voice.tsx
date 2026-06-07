@@ -43,6 +43,41 @@ import {
 import { useQuery } from "@tanstack/react-query";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+const LIST_PAGE_SIZE = 50;
+
+function listPageCount(total: number) {
+  return Math.max(1, Math.ceil(total / LIST_PAGE_SIZE));
+}
+
+function ResultsPager({
+  page,
+  total,
+  onPageChange,
+}: {
+  page: number;
+  total: number;
+  onPageChange: (page: number) => void;
+}) {
+  if (total <= LIST_PAGE_SIZE) return null;
+  const pages = listPageCount(total);
+  const safePage = Math.min(page, pages);
+  const start = (safePage - 1) * LIST_PAGE_SIZE + 1;
+  const end = Math.min(total, safePage * LIST_PAGE_SIZE);
+
+  return (
+    <div className="flex items-center justify-between gap-3 border-t border-border px-4 py-3 text-xs text-muted-foreground">
+      <span>Showing {start}-{end} of {total}</span>
+      <div className="flex items-center gap-2">
+        <Button variant="outline" size="sm" className="h-8 px-3" disabled={safePage <= 1} onClick={() => onPageChange(Math.max(1, safePage - 1))}>
+          Previous
+        </Button>
+        <Button variant="outline" size="sm" className="h-8 px-3" disabled={safePage >= pages} onClick={() => onPageChange(Math.min(pages, safePage + 1))}>
+          Next
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 /* ── Types ──────────────────────────────────────────────────────── */
 
@@ -223,6 +258,7 @@ export default function WarehouseVoice() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [queuedItems, setQueuedItems] = useState<WarehouseItem[]>([]);
   const [sessionResults, setSessionResults] = useState<SessionResult[]>([]);
+  const [resultsPage, setResultsPage] = useState(1);
   const [statusMessage, setStatusMessage] = useState("");
   const [lastHeard, setLastHeard] = useState("");
 
@@ -532,6 +568,7 @@ export default function WarehouseVoice() {
   const handleStart = useCallback(() => {
     sessionResultsRef.current = [];
     setSessionResults([]);
+    setResultsPage(1);
     setCurrentIndex(0);
     setLastHeard("");
     setStatusMessage("");
@@ -595,6 +632,7 @@ export default function WarehouseVoice() {
     setSelectedCategory("");
     setSessionResults([]);
     sessionResultsRef.current = [];
+    setResultsPage(1);
     setCurrentIndex(0);
     setQueuedItems([]);
     setAiMatchedItem(null);
@@ -613,6 +651,9 @@ export default function WarehouseVoice() {
   const summaryVerified = sessionResults.filter((r) => r.status === "verified").length;
   const summaryUpdated = sessionResults.filter((r) => r.status === "updated").length;
   const summarySkipped = sessionResults.filter((r) => r.status === "skipped" || r.status === "no-response").length;
+  const safeResultsPage = Math.min(resultsPage, listPageCount(sessionResults.length));
+  const resultsPageStart = (safeResultsPage - 1) * LIST_PAGE_SIZE;
+  const visibleSessionResults = sessionResults.slice(resultsPageStart, resultsPageStart + LIST_PAGE_SIZE);
 
   const queueSize = buildQueue().length;
 
@@ -1220,8 +1261,8 @@ export default function WarehouseVoice() {
                   <ClipboardList className="w-4 h-4 text-primary" />
                   <span className="text-sm font-bold">Count Details</span>
                 </div>
-                {sessionResults.map((r, idx) => (
-                  <div key={idx} className="flex items-center gap-3 px-4 py-3">
+                {visibleSessionResults.map((r, idx) => (
+                  <div key={resultsPageStart + idx} className="flex items-center gap-3 px-4 py-3">
                     {r.status === "verified" && <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />}
                     {r.status === "updated" && <AlertCircle className="w-4 h-4 text-amber-500 shrink-0" />}
                     {(r.status === "skipped" || r.status === "no-response") && (
@@ -1247,6 +1288,7 @@ export default function WarehouseVoice() {
                     </div>
                   </div>
                 ))}
+                <ResultsPager page={resultsPage} total={sessionResults.length} onPageChange={setResultsPage} />
               </div>
             )}
 

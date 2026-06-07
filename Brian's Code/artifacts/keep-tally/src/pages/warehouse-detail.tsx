@@ -30,6 +30,7 @@ import {
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const VENDORS = ["Costco", "Sam's Club", "Vistar", "Walmart", "Pepsi Corp", "Other"];
 const ALL_LOCATIONS = [...LOCATIONS, "Warehouse"] as const;
+const LIST_PAGE_SIZE = 50;
 
 type WarehouseItem = {
   id: number;
@@ -107,6 +108,58 @@ function statusColor(status: string) {
 function statusLabel(status: string) {
   const labels: Record<string, string> = { out: "Out of Stock", low: "Low Stock", reorder: "Reorder Soon", overstock: "Overstock", ok: "In Stock" };
   return labels[status] ?? status;
+}
+
+function listPageCount(total: number) {
+  return Math.max(1, Math.ceil(total / LIST_PAGE_SIZE));
+}
+
+function listPageItems<T>(items: T[], page: number) {
+  const safePage = Math.min(page, listPageCount(items.length));
+  const start = (safePage - 1) * LIST_PAGE_SIZE;
+  return items.slice(start, start + LIST_PAGE_SIZE);
+}
+
+function ListPager({
+  page,
+  total,
+  onPageChange,
+}: {
+  page: number;
+  total: number;
+  onPageChange: (page: number) => void;
+}) {
+  if (total <= LIST_PAGE_SIZE) return null;
+  const pages = listPageCount(total);
+  const safePage = Math.min(page, pages);
+  const start = (safePage - 1) * LIST_PAGE_SIZE + 1;
+  const end = Math.min(total, safePage * LIST_PAGE_SIZE);
+
+  return (
+    <div className="flex items-center justify-between gap-3 border-t border-border px-4 py-3 text-xs text-muted-foreground">
+      <span>Showing {start}-{end} of {total}</span>
+      <div className="flex items-center gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8 px-3"
+          disabled={safePage <= 1}
+          onClick={() => onPageChange(Math.max(1, safePage - 1))}
+        >
+          Previous
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8 px-3"
+          disabled={safePage >= pages}
+          onClick={() => onPageChange(Math.min(pages, safePage + 1))}
+        >
+          Next
+        </Button>
+      </div>
+    </div>
+  );
 }
 
 /* ── Receive Form ── */
@@ -334,6 +387,9 @@ export default function WarehouseDetailPage() {
   const [showReceive, setShowReceive] = useState(false);
   const [showTransfer, setShowTransfer] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
+  const [vendorPage, setVendorPage] = useState(1);
+  const [purchasePage, setPurchasePage] = useState(1);
+  const [transferPage, setTransferPage] = useState(1);
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ["warehouse-detail", id],
@@ -356,6 +412,9 @@ export default function WarehouseDetailPage() {
 
   const { item, purchases, transfers, vendorPricing, pricing } = data;
   const pctFull = item.maxPar > 0 ? Math.min(100, (item.quantity / item.maxPar) * 100) : null;
+  const pagedVendorPricing = listPageItems(vendorPricing, vendorPage);
+  const pagedPurchases = listPageItems(purchases, purchasePage);
+  const pagedTransfers = listPageItems(transfers, transferPage);
 
   return (
     <Layout>
@@ -444,7 +503,7 @@ export default function WarehouseDetailPage() {
               <>
                 <p className="text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wide">By Vendor</p>
                 <div className="space-y-1">
-                  {vendorPricing.map((vp) => (
+                  {pagedVendorPricing.map((vp) => (
                     <div key={vp.vendor} className="flex items-center justify-between text-sm py-1">
                       <span className="font-medium">{vp.vendor}</span>
                       <div className="flex items-center gap-4 text-xs text-muted-foreground">
@@ -455,6 +514,7 @@ export default function WarehouseDetailPage() {
                     </div>
                   ))}
                 </div>
+                <ListPager page={vendorPage} total={vendorPricing.length} onPageChange={setVendorPage} />
               </>
             )}
 
@@ -507,7 +567,7 @@ export default function WarehouseDetailPage() {
               <button onClick={() => navigate("/warehouse/purchases")} className="text-xs text-primary font-semibold hover:underline">View all</button>
             </div>
             <div className="divide-y divide-border">
-              {purchases.map((p) => (
+              {pagedPurchases.map((p) => (
                 <div key={p.id} className="px-4 py-3 flex items-center justify-between gap-3">
                   <div>
                     <p className="text-sm font-semibold">{p.vendor}</p>
@@ -523,6 +583,7 @@ export default function WarehouseDetailPage() {
                 </div>
               ))}
             </div>
+            <ListPager page={purchasePage} total={purchases.length} onPageChange={setPurchasePage} />
           </div>
         )}
 
@@ -533,7 +594,7 @@ export default function WarehouseDetailPage() {
               <h3 className="font-semibold text-sm flex items-center gap-2"><ArrowRightLeft className="w-4 h-4 text-primary" />Transfer History ({transfers.length})</h3>
             </div>
             <div className="divide-y divide-border">
-              {transfers.map((t) => (
+              {pagedTransfers.map((t) => (
                 <div key={t.id} className="px-4 py-3 flex items-center justify-between gap-3">
                   <div>
                     <p className="text-sm font-semibold">{t.storeLocation}</p>
@@ -544,6 +605,7 @@ export default function WarehouseDetailPage() {
                 </div>
               ))}
             </div>
+            <ListPager page={transferPage} total={transfers.length} onPageChange={setTransferPage} />
           </div>
         )}
 

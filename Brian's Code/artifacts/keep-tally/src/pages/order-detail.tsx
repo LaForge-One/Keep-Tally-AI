@@ -18,6 +18,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+const LIST_PAGE_SIZE = 50;
 
 type OrderItem = {
   id: number;
@@ -63,6 +64,52 @@ function groupByCategory(items: OrderItem[]) {
   return map;
 }
 
+function listPageCount(total: number) {
+  return Math.max(1, Math.ceil(total / LIST_PAGE_SIZE));
+}
+
+function PaginationFooter({
+  page,
+  total,
+  onPageChange,
+}: {
+  page: number;
+  total: number;
+  onPageChange: (page: number) => void;
+}) {
+  if (total <= LIST_PAGE_SIZE) return null;
+  const pages = listPageCount(total);
+  const safePage = Math.min(page, pages);
+  const start = (safePage - 1) * LIST_PAGE_SIZE + 1;
+  const end = Math.min(total, safePage * LIST_PAGE_SIZE);
+
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-card px-4 py-3 text-xs text-muted-foreground">
+      <span>Showing {start}-{end} of {total} order items</span>
+      <div className="flex items-center gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8 px-3"
+          disabled={safePage <= 1}
+          onClick={() => onPageChange(Math.max(1, safePage - 1))}
+        >
+          Previous
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8 px-3"
+          disabled={safePage >= pages}
+          onClick={() => onPageChange(Math.min(pages, safePage + 1))}
+        >
+          Next
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export default function OrderDetailPage() {
   const [, params] = useRoute("/orders/:id");
   const orderId = params?.id ? parseInt(params.id) : null;
@@ -75,6 +122,7 @@ export default function OrderDetailPage() {
   const [receivedQtys, setReceivedQtys] = useState<Record<number, number>>({});
   const [saving, setSaving] = useState(false);
   const [collapsedCategories, setCollapsedCategories] = useState<Record<string, boolean>>({});
+  const [itemPage, setItemPage] = useState(1);
 
   const { data: order, isLoading, refetch } = useQuery<Order>({
     queryKey: ["order", orderId],
@@ -219,7 +267,10 @@ export default function OrderDetailPage() {
     );
   }
 
-  const grouped = groupByCategory(order.items);
+  const safeItemPage = Math.min(itemPage, listPageCount(order.items.length));
+  const itemPageStart = (safeItemPage - 1) * LIST_PAGE_SIZE;
+  const pageItems = order.items.slice(itemPageStart, itemPageStart + LIST_PAGE_SIZE);
+  const grouped = groupByCategory(pageItems);
   const isDraft = order.status === "draft";
   const isSent = order.status === "sent";
   const isPicked = order.status === "picked";
@@ -411,6 +462,8 @@ export default function OrderDetailPage() {
               No items in this order.
             </div>
           )}
+
+          <PaginationFooter page={itemPage} total={order.items.length} onPageChange={setItemPage} />
         </div>
 
         {!isReceived && (

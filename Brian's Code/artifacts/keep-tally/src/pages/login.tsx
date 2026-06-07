@@ -51,17 +51,17 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-[100dvh] items-center justify-center bg-[#f4f7fb] p-4">
-      <div className="w-full max-w-[380px] overflow-hidden rounded-xl border border-slate-200 bg-card shadow-xl">
+    <div className="flex min-h-[100dvh] items-center justify-center bg-background p-4">
+      <div className="w-full max-w-[360px] overflow-hidden rounded-xl border border-border bg-card shadow-xl">
         <div className="bg-primary px-7 pb-6 pt-7 text-center">
           <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl border border-white/15 bg-white/10 text-primary-foreground shadow-sm">
             <Package className="h-6 w-6" aria-hidden="true" />
           </div>
-          <h1 className="mb-1 text-lg font-bold tracking-tight text-primary-foreground">
+          <h1 className="mb-1 text-lg font-semibold tracking-tight text-primary-foreground">
             KeepTally
           </h1>
-          <p className="text-xs font-medium text-primary-foreground/70">
-            Sign in to your inventory workspace
+          <p className="text-xs text-primary-foreground/60">
+            Sign in to your account
           </p>
         </div>
 
@@ -84,7 +84,7 @@ export default function LoginPage() {
             <div className="flex flex-col gap-1.5">
               <Label
                 htmlFor="username"
-                className="text-[11.5px] font-semibold text-muted-foreground"
+                className="text-[11.5px] font-medium text-muted-foreground"
               >
                 Username
               </Label>
@@ -126,7 +126,7 @@ export default function LoginPage() {
               <div className="flex items-center justify-between">
                 <Label
                   htmlFor="password"
-                  className="text-[11.5px] font-semibold text-muted-foreground"
+                  className="text-[11.5px] font-medium text-muted-foreground"
                 >
                   Password
                 </Label>
@@ -193,9 +193,7 @@ export default function LoginPage() {
 
           <div className="my-4 flex items-center gap-3">
             <div className="h-px flex-1 bg-border" />
-            <span className="text-[11px] font-medium text-muted-foreground">
-              or
-            </span>
+            <span className="text-[11px] text-muted-foreground">or</span>
             <div className="h-px flex-1 bg-border" />
           </div>
 
@@ -204,7 +202,7 @@ export default function LoginPage() {
             variant="outline"
             className="w-full gap-2 transition-interactive"
             disabled
-            title="Single sign-on is not configured for this test environment."
+            title="Single sign-on middleware is not configured for this environment."
           >
             <Building2 className="h-4 w-4" />
             Continue with SSO

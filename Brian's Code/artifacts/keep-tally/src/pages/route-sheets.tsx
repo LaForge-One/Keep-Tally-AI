@@ -161,6 +161,7 @@ export default function RouteSheetsPage() {
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<RouteSheetForm>(blankSheet());
   const [page, setPage] = useState(1);
+  const [stopItemPages, setStopItemPages] = useState<Record<number, number>>({});
 
   const { data: sheets = [], isLoading } = useQuery<RouteSheetSummary[]>({
     queryKey: ["route-sheets"],
@@ -222,6 +223,10 @@ export default function RouteSheetsPage() {
     }));
   }
 
+  function setStopItemPage(stopIndex: number, nextPage: number) {
+    setStopItemPages((current) => ({ ...current, [stopIndex]: nextPage }));
+  }
+
   function removeChecklistItem(stopIndex: number, itemIndex: number) {
     setForm((current) => ({
       ...current,
@@ -234,6 +239,7 @@ export default function RouteSheetsPage() {
 
   async function openNew() {
     setForm(blankSheet());
+    setStopItemPages({});
     setDialogOpen(true);
   }
 
@@ -254,6 +260,7 @@ export default function RouteSheetsPage() {
         notes: detail.notes ?? "",
         stops: detail.stops.length > 0 ? detail.stops : [blankStop(1)],
       });
+      setStopItemPages({});
       setDialogOpen(true);
     } catch (error) {
       toast({ title: "Could not open route sheet", description: error instanceof Error ? error.message : "Try again.", variant: "destructive" });
@@ -377,6 +384,12 @@ export default function RouteSheetsPage() {
 
             {sortedStops.map((stop) => {
               const index = form.stops.indexOf(stop);
+              const stopItemPagesTotal = Math.max(1, Math.ceil(stop.items.length / LIST_PAGE_SIZE));
+              const stopItemPage = Math.min(stopItemPages[index] ?? 1, stopItemPagesTotal);
+              const stopItemStart = (stopItemPage - 1) * LIST_PAGE_SIZE;
+              const visibleStopItems = stop.items
+                .map((item, itemIndex) => ({ item, itemIndex }))
+                .slice(stopItemStart, stopItemStart + LIST_PAGE_SIZE);
               return (
                 <div key={index} className="rounded-lg border bg-slate-50 p-4 space-y-4">
                   <div className="flex items-center justify-between gap-3">
@@ -407,9 +420,25 @@ export default function RouteSheetsPage() {
                   </div>
 
                   <div className="space-y-2">
-                    <div className="flex items-center justify-between"><div className="text-sm font-semibold">Inventory checklist</div><Button variant="outline" size="sm" onClick={() => addChecklistItem(index)}>Add Product</Button></div>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="text-sm font-semibold">Inventory checklist</div>
+                        {stop.items.length > LIST_PAGE_SIZE && (
+                          <p className="text-xs text-muted-foreground">
+                            Showing {stopItemStart + 1}-{Math.min(stop.items.length, stopItemStart + LIST_PAGE_SIZE)} of {stop.items.length} products.
+                          </p>
+                        )}
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => addChecklistItem(index)}
+                      >
+                        Add Product
+                      </Button>
+                    </div>
                     <div className="space-y-2">
-                      {stop.items.map((item, itemIndex) => (
+                      {visibleStopItems.map(({ item, itemIndex }) => (
                         <div key={itemIndex} className="grid gap-2 md:grid-cols-12">
                           <Input className="md:col-span-4" placeholder="Product" value={item.productName} onChange={(e) => updateStopItem(index, itemIndex, { productName: e.target.value })} />
                           <NumberInput className="md:col-span-2" value={item.parLevel} onChange={(value) => updateStopItem(index, itemIndex, { parLevel: value })} />
@@ -418,6 +447,26 @@ export default function RouteSheetsPage() {
                           <Button variant="ghost" size="sm" onClick={() => removeChecklistItem(index, itemIndex)}>Remove</Button>
                         </div>
                       ))}
+                      {stop.items.length > LIST_PAGE_SIZE && (
+                        <div className="flex items-center justify-end gap-2 text-xs text-muted-foreground">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={stopItemPage <= 1}
+                            onClick={() => setStopItemPage(index, Math.max(1, stopItemPage - 1))}
+                          >
+                            Previous
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={stopItemPage >= stopItemPagesTotal}
+                            onClick={() => setStopItemPage(index, Math.min(stopItemPagesTotal, stopItemPage + 1))}
+                          >
+                            Next
+                          </Button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>

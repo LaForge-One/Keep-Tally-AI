@@ -8,6 +8,17 @@ import {
 } from "react";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+const INACTIVITY_TIMEOUT_MS = 15 * 60 * 1000;
+const ACTIVITY_STORAGE_KEY = "keeptally:lastActivityAt";
+const ACTIVITY_EVENTS = [
+  "click",
+  "keydown",
+  "mousemove",
+  "mousedown",
+  "scroll",
+  "touchstart",
+  "pointerdown",
+] as const;
 
 export type UserRole = "admin" | "warehouse" | "stocker";
 export type PermissionKey =
@@ -92,6 +103,81 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await fetch(`${BASE}/api/auth/logout`, { method: "POST", credentials: "include" });
     setAuthState({ status: "unauthenticated" });
   }, []);
+
+  useEffect(() => {
+    if (authState.status !== "authenticated") return;
+
+    let lastActivityAt = Date.now();
+    let timeoutId: number | undefined;
+    let isLoggingOut = false;
+
+    const persistActivity = (value: number) => {
+      lastActivityAt = value;
+      try {
+        window.localStorage.setItem(ACTIVITY_STORAGE_KEY, String(value));
+      } catch {
+        // Local storage can be unavailable in private/restricted modes; the in-memory timer still works.
+      }
+    };
+
+    const markActive = () => {
+      if (document.visibilityState === "hidden") return;
+      persistActivity(Date.now());
+      scheduleCheck();
+    };
+
+    const logoutForInactivity = async () => {
+      if (isLoggingOut) return;
+      isLoggingOut = true;
+      await logout();
+    };
+
+    const checkIdle = () => {
+      const idleFor = Date.now() - lastActivityAt;
+      if (idleFor >= INACTIVITY_TIMEOUT_MS) {
+        void logoutForInactivity();
+        return;
+      }
+      scheduleCheck();
+    };
+
+    function scheduleCheck() {
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+      const remaining = Math.max(0, INACTIVITY_TIMEOUT_MS - (Date.now() - lastActivityAt));
+      timeoutId = window.setTimeout(checkIdle, remaining + 250);
+    }
+
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key !== ACTIVITY_STORAGE_KEY || !event.newValue) return;
+      const nextActivity = Number.parseInt(event.newValue, 10);
+      if (!Number.isFinite(nextActivity)) return;
+      lastActivityAt = Math.max(lastActivityAt, nextActivity);
+      scheduleCheck();
+    };
+
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        checkIdle();
+      }
+    };
+
+    persistActivity(Date.now());
+    for (const eventName of ACTIVITY_EVENTS) {
+      window.addEventListener(eventName, markActive, { passive: true });
+    }
+    window.addEventListener("storage", handleStorage);
+    document.addEventListener("visibilitychange", handleVisibility);
+    scheduleCheck();
+
+    return () => {
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+      for (const eventName of ACTIVITY_EVENTS) {
+        window.removeEventListener(eventName, markActive);
+      }
+      window.removeEventListener("storage", handleStorage);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
+  }, [authState.status, logout]);
 
   const hasPermission = useCallback(
     (key: PermissionKey): boolean => {

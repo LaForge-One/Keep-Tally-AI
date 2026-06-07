@@ -20,6 +20,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+const LIST_PAGE_SIZE = 50;
 
 type ImportMode = "deduct" | "par";
 
@@ -66,6 +67,55 @@ function apiErrorMessage(payload: ApiErrorPayload, fallback: string): string {
   }
   return fallback;
 }
+
+function pageCount(total: number) {
+  return Math.max(1, Math.ceil(total / LIST_PAGE_SIZE));
+}
+
+function PageFooter({
+  page,
+  total,
+  label,
+  onPageChange,
+}: {
+  page: number;
+  total: number;
+  label: string;
+  onPageChange: (page: number) => void;
+}) {
+  if (total <= LIST_PAGE_SIZE) return null;
+  const pages = pageCount(total);
+  const safePage = Math.min(page, pages);
+  const start = (safePage - 1) * LIST_PAGE_SIZE + 1;
+  const end = Math.min(total, safePage * LIST_PAGE_SIZE);
+
+  return (
+    <div className="flex items-center justify-between gap-3 px-4 py-3 text-xs text-muted-foreground">
+      <span>Showing {start}-{end} of {total} {label}</span>
+      <div className="flex items-center gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8 px-3"
+          disabled={safePage <= 1}
+          onClick={() => onPageChange(Math.max(1, safePage - 1))}
+        >
+          Previous
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8 px-3"
+          disabled={safePage >= pages}
+          onClick={() => onPageChange(Math.min(pages, safePage + 1))}
+        >
+          Next
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export default function ImportPage() {
   const { hasPermission } = useAuth();
 
@@ -84,6 +134,8 @@ export default function ImportPage() {
   const [applying, setApplying] = useState(false);
   const [applyResult, setApplyResult] = useState<{ applied: number } | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [matchedPage, setMatchedPage] = useState(1);
+  const [unmatchedPage, setUnmatchedPage] = useState(1);
 
   if (!hasPermission("edit_store_inventory")) {
     return (
@@ -112,6 +164,8 @@ export default function ImportPage() {
       const data: PreviewData = await res.json();
       setPreview(data);
       setSelected(new Set(data.matched.map((m) => m.itemId)));
+      setMatchedPage(1);
+      setUnmatchedPage(1);
       setStep("preview");
     } catch (e: unknown) {
       toast({ title: "Upload failed", description: e instanceof Error ? e.message : "Unknown error", variant: "destructive" });
@@ -161,6 +215,11 @@ export default function ImportPage() {
   function suggestedPar(qtySold: number) {
     return Math.ceil((qtySold / 7) * restockDays);
   }
+
+  const matchedPageStart = (Math.min(matchedPage, pageCount(preview?.matched.length ?? 0)) - 1) * LIST_PAGE_SIZE;
+  const unmatchedPageStart = (Math.min(unmatchedPage, pageCount(preview?.unmatched.length ?? 0)) - 1) * LIST_PAGE_SIZE;
+  const matchedPageItems = preview?.matched.slice(matchedPageStart, matchedPageStart + LIST_PAGE_SIZE) ?? [];
+  const unmatchedPageItems = preview?.unmatched.slice(unmatchedPageStart, unmatchedPageStart + LIST_PAGE_SIZE) ?? [];
 
   return (
     <Layout>
@@ -376,7 +435,7 @@ export default function ImportPage() {
                     <span className="text-right px-2">{mode === "deduct" ? "New Qty" : "New Par"}</span>
                     <span className="text-right">Now</span>
                   </div>
-                  {preview.matched.map((item) => {
+                  {matchedPageItems.map((item) => {
                     const checked = selected.has(item.itemId);
                     const newPar = suggestedPar(item.qtySold);
                     const newQty = item.projectedQty;
@@ -407,6 +466,7 @@ export default function ImportPage() {
                       </button>
                     );
                   })}
+                  <PageFooter page={matchedPage} total={preview.matched.length} label="matched items" onPageChange={setMatchedPage} />
                 </div>
               </div>
             )}
@@ -419,8 +479,8 @@ export default function ImportPage() {
                   Unmatched Items ({preview.unmatched.length})
                 </h3>
                 <div className="bg-card border border-amber-200 rounded-xl overflow-hidden divide-y divide-border">
-                  {preview.unmatched.map((item, i) => (
-                    <div key={i} className="flex items-center justify-between px-4 py-3">
+                  {unmatchedPageItems.map((item, i) => (
+                    <div key={`${item.csvName}-${unmatchedPageStart + i}`} className="flex items-center justify-between px-4 py-3">
                       <div>
                         <p className="text-sm font-medium text-muted-foreground">{item.csvName}</p>
                       </div>
@@ -430,6 +490,7 @@ export default function ImportPage() {
                       </div>
                     </div>
                   ))}
+                  <PageFooter page={unmatchedPage} total={preview.unmatched.length} label="unmatched items" onPageChange={setUnmatchedPage} />
                 </div>
                 <p className="text-xs text-muted-foreground">These items weren't found in your inventory. Add them to KeepTally first, then re-import.</p>
               </div>

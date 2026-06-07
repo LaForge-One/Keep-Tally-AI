@@ -1,22 +1,23 @@
 import { ReactNode, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useLocation as useWouterLocation } from "wouter";
 import {
-  LayoutDashboard,
-  Package,
-  Warehouse,
-  ClipboardList,
-  RefreshCw,
-  Mic,
+  ArrowLeftRight,
   BarChart2,
-  Users,
-  Settings,
-  LogOut,
-  ChevronDown,
   Bell,
-  Search,
-  X,
-  Menu,
   Bot,
+  ChevronDown,
+  ClipboardList,
+  LayoutDashboard,
+  LogOut,
+  Map,
+  Menu,
+  Mic,
+  Package,
+  Search,
+  Settings,
+  Users,
+  Warehouse,
+  X,
 } from "lucide-react";
 import {
   Select,
@@ -54,11 +55,11 @@ interface NavItem {
   path: string;
   label: string;
   icon: React.ElementType;
+  section?: string;
 }
 
 interface SidebarProps {
-  mainNav: NavItem[];
-  bottomNav: NavItem[];
+  nav: NavItem[];
   location: string;
   currentUser: ReturnType<typeof useCurrentUser>;
   userInitials: string;
@@ -67,8 +68,7 @@ interface SidebarProps {
 }
 
 function SidebarNav({
-  mainNav,
-  bottomNav,
+  nav,
   location,
   currentUser,
   userInitials,
@@ -80,98 +80,190 @@ function SidebarNav({
     return location.startsWith(path);
   }
 
-  function navItemClass(active: boolean) {
-    return `flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-interactive ${
-      active
-        ? "bg-primary/10 text-primary font-semibold"
-        : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-    }`;
-  }
-
-  function navIconClass(active: boolean) {
-    return `h-[17px] w-[17px] shrink-0 ${
-      active ? "text-primary" : "text-slate-400"
-    }`;
-  }
-
   return (
-    <div className="flex h-full flex-col border-r border-slate-200 bg-[#f8fafc]">
-      {/* Logo */}
-      <div className="flex h-14 shrink-0 items-center border-b border-slate-200 px-5">
-        <div className="flex items-center gap-2.5">
-          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-white shadow-sm border border-slate-200">
-            <Package className="h-4 w-4 text-sky-500" />
-          </div>
-          <span className="text-lg font-bold tracking-tight text-slate-900">
-            KeepTally
-          </span>
+    <div
+      className="flex h-full flex-col"
+      style={{ background: "#f8fafc", borderRight: "1px solid #d8e2ee" }}
+    >
+      <div
+        className="flex h-14 shrink-0 items-center gap-2.5 px-5"
+        style={{ borderBottom: "1px solid #d8e2ee" }}
+      >
+        <div
+          className="grid place-items-center"
+          style={{
+            width: 28,
+            height: 28,
+            border: "1px solid #d8e2ee",
+            borderRadius: 8,
+            background: "#fff",
+            boxShadow:
+              "0 1px 2px rgba(15,23,42,.06),0 1px 3px rgba(15,23,42,.08)",
+            color: "#38a4dc",
+          }}
+        >
+          <svg
+            viewBox="0 0 24 24"
+            width={16}
+            height={16}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2.15}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="m21 8-9-5-9 5 9 5 9-5Z" />
+            <path d="M3 8v8l9 5 9-5V8" />
+            <path d="M12 13v8" />
+          </svg>
         </div>
+        <span
+          style={{
+            fontSize: 18,
+            fontWeight: 900,
+            letterSpacing: 0,
+            color: "#162f57",
+          }}
+        >
+          KeepTally
+        </span>
       </div>
 
-      {/* Nav items */}
-      <nav className="flex-1 space-y-0.5 overflow-y-auto px-2.5 py-3">
-        {mainNav.map((item) => {
+      <nav
+        className="flex-1 overflow-y-auto"
+        style={{ padding: "12px 10px" }}
+        aria-label="Primary navigation"
+      >
+        {nav.map((item) => {
           const active = isActive(item.path);
+          const isVoice = item.path === "/voice-check";
+
           return (
-            <Link
-              key={item.path}
-              href={item.path}
-              onClick={onClose}
-              className={navItemClass(active)}
-            >
-              <item.icon className={navIconClass(active)} />
-              <span className="truncate">{item.label}</span>
-              {item.path === "/voice-check" && !active && (
-                <span className="ml-auto rounded bg-primary/10 px-1.5 py-0.5 text-[9px] font-bold tracking-wide text-primary">
-                  PRIMARY
-                </span>
+            <div key={item.path}>
+              {item.section && (
+                <div
+                  style={{
+                    margin: "14px 10px 6px",
+                    color: "#94a3b8",
+                    fontSize: 10,
+                    fontWeight: 900,
+                    letterSpacing: "0.08em",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  {item.section}
+                </div>
               )}
-            </Link>
+              <Link
+                href={item.path}
+                onClick={onClose}
+                className="hover:bg-[#eef4fa] hover:text-[#172f56]"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  minHeight: 36,
+                  gap: 10,
+                  padding: "8px 12px",
+                  marginBottom: 2,
+                  borderRadius: 6,
+                  fontSize: 14,
+                  fontWeight: 700,
+                  textDecoration: "none",
+                  transition: "background 150ms ease, color 150ms ease",
+                  ...(active
+                    ? { background: "#eaf2fb", color: "#446fa7" }
+                    : isVoice
+                      ? {
+                          background:
+                            "linear-gradient(135deg,rgba(68,111,167,.13),rgba(68,111,167,.07))",
+                          color: "#446fa7",
+                        }
+                      : { color: "#5b6f88" }),
+                }}
+              >
+                <item.icon
+                  style={{
+                    width: 17,
+                    height: 17,
+                    flexShrink: 0,
+                    strokeWidth: 2.15,
+                  }}
+                  aria-hidden="true"
+                />
+                <span className="truncate">{item.label}</span>
+                {isVoice && !active && (
+                  <span
+                    style={{
+                      marginLeft: "auto",
+                      borderRadius: 4,
+                      background: "#eaf2fb",
+                      color: "#446fa7",
+                      padding: "2px 6px",
+                      fontSize: 9,
+                      fontWeight: 900,
+                      letterSpacing: "0.04em",
+                    }}
+                  >
+                    PRIMARY
+                  </span>
+                )}
+              </Link>
+            </div>
           );
         })}
-
-        {bottomNav.length > 0 && (
-          <>
-            <div className="py-2 px-1">
-              <div className="h-px bg-slate-200" />
-            </div>
-            {bottomNav.map((item) => {
-              const active = isActive(item.path);
-              return (
-                <Link
-                  key={item.path}
-                  href={item.path}
-                  onClick={onClose}
-                  className={navItemClass(active)}
-                >
-                  <item.icon className={navIconClass(active)} />
-                  <span className="truncate">{item.label}</span>
-                </Link>
-              );
-            })}
-          </>
-        )}
       </nav>
 
-      {/* User profile mini-card */}
       {currentUser && (
-        <div className="p-3 border-t border-slate-200">
+        <div style={{ padding: 12, borderTop: "1px solid #d8e2ee" }}>
           <button
             onClick={onLogout}
-            className="flex w-full items-center gap-2.5 rounded-lg bg-white p-2.5 shadow-sm border border-slate-100 hover:border-slate-300 hover:shadow-md transition-all cursor-pointer group text-left"
+            className="flex w-full items-center gap-2.5 text-left"
+            style={{
+              border: "1px solid #e8eef5",
+              borderRadius: 10,
+              background: "#fff",
+              padding: 10,
+              boxShadow:
+                "0 1px 2px rgba(15,23,42,.06),0 1px 3px rgba(15,23,42,.08)",
+              cursor: "pointer",
+              transition: "box-shadow 150ms ease, border-color 150ms ease",
+            }}
           >
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-sky-100 text-sky-700 font-semibold text-xs">
+            <div
+              className="grid shrink-0 place-items-center"
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: 999,
+                background: "#dff0fb",
+                color: "#28669c",
+                fontSize: 12,
+                fontWeight: 900,
+              }}
+            >
               {userInitials}
             </div>
-            <div className="flex flex-col flex-1 min-w-0">
-              <span className="text-sm font-medium text-slate-900 truncate leading-tight">
+            <div className="flex min-w-0 flex-1 flex-col">
+              <span
+                className="truncate"
+                style={{ fontSize: 13, fontWeight: 700, color: "#162f57" }}
+              >
                 {currentUser.displayName}
               </span>
-              <span className="text-xs text-slate-500 leading-tight">
+              <span style={{ fontSize: 12, color: "#64748b" }}>
                 {ROLE_LABELS[currentUser.role] ?? currentUser.role}
               </span>
             </div>
-            <LogOut className="h-3.5 w-3.5 text-slate-300 group-hover:text-red-400 transition-colors shrink-0" />
+            <LogOut
+              style={{
+                width: 14,
+                height: 14,
+                color: "#cbd5e1",
+                flexShrink: 0,
+              }}
+              aria-hidden="true"
+            />
           </button>
         </div>
       )}
@@ -188,6 +280,7 @@ export function Layout({ children }: { children: ReactNode }) {
   const { selectedLocation, setSelectedLocation } = useSelectedLocation();
   const { logout, hasPermission } = useAuth();
   const currentUser = useCurrentUser();
+
   const isStoreInventoryPage = location === "/inventory";
   const isWarehousePage = location.startsWith("/warehouse");
   const canUseStoreLocationSelector =
@@ -236,25 +329,49 @@ export function Layout({ children }: { children: ReactNode }) {
   const alertCount =
     (summary?.belowParCount ?? 0) + (summary?.outOfStockCount ?? 0);
 
-  const mainNav: NavItem[] = [
+  const nav: NavItem[] = [
     { path: "/voice-check", label: "Voice Inventory", icon: Mic },
     { path: "/", label: "Dashboard", icon: LayoutDashboard },
-    { path: "/inventory", label: "Store Inventory", icon: Package },
+    {
+      path: "/inventory",
+      label: "Store Inventory",
+      icon: Package,
+      section: "Inventory",
+    },
     ...(hasPermission("view_warehouse")
       ? [{ path: "/warehouse", label: "Warehouse Inventory", icon: Warehouse }]
       : []),
-    { path: "/orders", label: "Pick Lists", icon: ClipboardList },
-    { path: "/route-sheets", label: "Route Sheets", icon: ClipboardList },
-    { path: "/restock", label: "Transfers", icon: RefreshCw },
-    { path: "/agents", label: "Agent Insights", icon: Bot },
+    { path: "/restock", label: "Transfers", icon: ArrowLeftRight },
+    {
+      path: "/orders",
+      label: "Pick Lists",
+      icon: ClipboardList,
+      section: "Field Work",
+    },
+    { path: "/route-sheets", label: "Route Sheets", icon: Map },
+    {
+      path: "/agents",
+      label: "Agent Insights",
+      icon: Bot,
+      section: "Intelligence",
+    },
     { path: "/history", label: "Reports", icon: BarChart2 },
-  ];
-
-  const bottomNav: NavItem[] = [
     ...(currentUser?.role === "admin"
-      ? [{ path: "/admin/users", label: "Users & Permissions", icon: Users }]
+      ? [
+          {
+            path: "/admin/users",
+            label: "Users & Permissions",
+            icon: Users,
+            section: "Admin",
+          },
+        ]
       : []),
-    { path: "/settings", label: "Settings", icon: Settings },
+    {
+      path: "/settings",
+      label: "Settings",
+      icon: Settings,
+      section: currentUser?.role !== "admin" ? "Admin" : undefined,
+    },
   ];
 
   const userInitials = currentUser?.displayName
@@ -279,8 +396,7 @@ export function Layout({ children }: { children: ReactNode }) {
   }
 
   const sidebarProps: SidebarProps = {
-    mainNav,
-    bottomNav,
+    nav,
     location,
     currentUser,
     userInitials,
@@ -289,13 +405,11 @@ export function Layout({ children }: { children: ReactNode }) {
   };
 
   return (
-    <div className="flex min-h-screen bg-[#fafafa]">
-      {/* Desktop fixed sidebar */}
-      <aside className="hidden lg:flex fixed inset-y-0 left-0 z-30 w-56 flex-col">
+    <div className="flex min-h-screen" style={{ background: "#f4f7fb" }}>
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 flex-col lg:flex">
         <SidebarNav {...sidebarProps} />
       </aside>
 
-      {/* Mobile sidebar backdrop */}
       {sidebarOpen && (
         <div
           className="fixed inset-0 z-40 bg-slate-900/40 lg:hidden"
@@ -303,16 +417,17 @@ export function Layout({ children }: { children: ReactNode }) {
         />
       )}
 
-      {/* Mobile sidebar drawer */}
       <aside
-        className={`fixed inset-y-0 left-0 z-50 w-56 flex-col lg:hidden transition-transform duration-200 ease-in-out ${
+        className={`fixed inset-y-0 left-0 z-50 w-60 flex-col transition-transform duration-200 ease-in-out lg:hidden ${
           sidebarOpen ? "flex translate-x-0" : "hidden -translate-x-full"
         }`}
       >
         <div className="absolute right-2 top-3 z-10">
           <button
             onClick={() => setSidebarOpen(false)}
-            className="rounded-md p-1.5 text-slate-500 hover:bg-slate-200"
+            className="rounded-md p-1.5"
+            style={{ color: "#64748b" }}
+            aria-label="Close navigation"
           >
             <X className="h-4 w-4" />
           </button>
@@ -320,19 +435,20 @@ export function Layout({ children }: { children: ReactNode }) {
         <SidebarNav {...sidebarProps} />
       </aside>
 
-      {/* Main content column */}
-      <div className="flex flex-1 flex-col lg:pl-56 min-w-0">
-        {/* Top header */}
-        <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-slate-200 bg-white px-4 md:px-6">
-          {/* Hamburger (mobile) */}
+      <div className="flex min-w-0 flex-1 flex-col lg:pl-60">
+        <header
+          className="sticky top-0 z-20 flex h-14 items-center gap-3 px-4 md:px-6"
+          style={{ borderBottom: "1px solid #d8e2ee", background: "#ffffff" }}
+        >
           <button
             onClick={() => setSidebarOpen(true)}
-            className="lg:hidden rounded-md p-1.5 text-slate-500 hover:bg-slate-100"
+            className="rounded-md p-1.5 lg:hidden"
+            style={{ color: "#64748b" }}
+            aria-label="Open navigation"
           >
             <Menu className="h-5 w-5" />
           </button>
 
-          {/* Store location selector: available only on Store Inventory. */}
           {canUseStoreLocationSelector && (
             <Select
               value={selectedLocation ?? "__all__"}
@@ -344,8 +460,14 @@ export function Layout({ children }: { children: ReactNode }) {
                 )
               }
             >
-              <SelectTrigger className="h-8 w-auto min-w-[140px] max-w-[200px] text-sm border-slate-200 bg-white font-medium">
-                <Warehouse className="w-3.5 h-3.5 text-slate-400 shrink-0 mr-1" />
+              <SelectTrigger
+                className="h-8 w-auto min-w-[140px] max-w-[200px] text-sm font-medium"
+                style={{ borderColor: "#d8e2ee", background: "#f8fafc" }}
+              >
+                <Warehouse
+                  className="mr-1 h-3.5 w-3.5 shrink-0"
+                  style={{ color: "#94a3b8" }}
+                />
                 <SelectValue placeholder="All Locations" />
               </SelectTrigger>
               <SelectContent>
@@ -362,7 +484,15 @@ export function Layout({ children }: { children: ReactNode }) {
           )}
 
           {isWarehousePage && (
-            <div className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700">
+            <div
+              className="hidden items-center gap-2 rounded-lg px-3 text-sm font-medium sm:flex"
+              style={{
+                minHeight: 32,
+                border: "1px solid #d8e2ee",
+                background: "#f8fafc",
+                color: "#334155",
+              }}
+            >
               <Warehouse className="h-3.5 w-3.5 text-slate-400" />
               Warehouse Inventory
             </div>
@@ -370,52 +500,105 @@ export function Layout({ children }: { children: ReactNode }) {
 
           <div className="flex-1" />
 
-          {/* Search bar */}
           <form onSubmit={handleSearch} className="hidden sm:block">
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+              <Search
+                className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2"
+                style={{ color: "#94a3b8" }}
+                aria-hidden="true"
+              />
               <input
-                type="text"
-                placeholder="Search inventory..."
+                type="search"
+                placeholder="Search items, routes, scans..."
                 value={searchValue}
                 onChange={(e) => setSearchValue(e.target.value)}
-                className="h-8 w-48 md:w-56 rounded-full border border-slate-200 bg-slate-50 pl-8 pr-4 text-sm outline-none transition-all focus:border-sky-400 focus:bg-white focus:ring-1 focus:ring-sky-400 focus:w-64"
+                aria-label="Search"
+                style={{
+                  height: 36,
+                  width: 240,
+                  border: "1px solid #d8e2ee",
+                  borderRadius: 8,
+                  background: "#f8fafc",
+                  padding: "0 12px 0 34px",
+                  fontSize: 13,
+                  color: "#162f57",
+                  outline: "none",
+                  fontFamily: "inherit",
+                  transition: "border-color 150ms ease",
+                }}
               />
             </div>
           </form>
 
-          {/* Notification bell */}
           <button
-            className="relative rounded-full p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors"
+            className="relative grid place-items-center rounded-lg"
+            style={{
+              width: 36,
+              height: 36,
+              border: "1px solid #d8e2ee",
+              background: "#fff",
+              color: "#64748b",
+              transition: "background 150ms ease",
+            }}
             onClick={() => navigate("/inventory")}
-            title={
+            aria-label={
               alertCount > 0
                 ? `${alertCount} items need attention`
                 : "No alerts"
             }
           >
-            <Bell className="h-5 w-5" />
+            <Bell className="h-4 w-4" />
             {alertCount > 0 && (
-              <span className="absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[9px] font-bold text-white border-2 border-white">
+              <span
+                className="absolute grid place-items-center border-2 border-white font-black text-white"
+                style={{
+                  top: -6,
+                  right: -6,
+                  minWidth: 18,
+                  height: 18,
+                  borderRadius: 999,
+                  background: "#ef4444",
+                  fontSize: 10,
+                }}
+              >
                 {alertCount > 99 ? "99+" : alertCount}
               </span>
             )}
           </button>
 
-          {/* User menu */}
           {currentUser && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button className="flex items-center gap-2 rounded-lg px-1.5 py-1 hover:bg-slate-100 transition-colors">
-                  <div className="flex h-7 w-7 items-center justify-center rounded-full bg-sky-100 text-sky-700 font-semibold text-xs shrink-0">
+                <button
+                  className="flex items-center gap-2 rounded-lg px-1.5 py-1"
+                  style={{ cursor: "pointer", transition: "background 150ms ease" }}
+                >
+                  <div
+                    className="grid shrink-0 place-items-center"
+                    style={{
+                      width: 28,
+                      height: 28,
+                      borderRadius: 999,
+                      background: "#dff0fb",
+                      color: "#28669c",
+                      fontSize: 11,
+                      fontWeight: 900,
+                    }}
+                  >
                     {userInitials}
                   </div>
-                  <div className="hidden sm:flex flex-col items-start leading-none">
-                    <span className="text-sm font-medium text-slate-700">
+                  <div className="hidden flex-col items-start leading-none sm:flex">
+                    <span
+                      style={{
+                        fontSize: 13,
+                        fontWeight: 700,
+                        color: "#334155",
+                      }}
+                    >
                       {currentUser.displayName.split(" ")[0]}
                     </span>
                     <span
-                      className={`text-[10px] font-semibold px-1 rounded ${
+                      className={`rounded px-1 text-[10px] font-semibold ${
                         ROLE_BADGE[currentUser.role] ??
                         "bg-slate-100 text-slate-600"
                       }`}
@@ -423,7 +606,11 @@ export function Layout({ children }: { children: ReactNode }) {
                       {ROLE_LABELS[currentUser.role] ?? currentUser.role}
                     </span>
                   </div>
-                  <ChevronDown className="h-3 w-3 text-slate-400 hidden sm:block" />
+                  <ChevronDown
+                    className="hidden h-3 w-3 sm:block"
+                    style={{ color: "#94a3b8" }}
+                    aria-hidden="true"
+                  />
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-48">
@@ -435,7 +622,7 @@ export function Layout({ children }: { children: ReactNode }) {
                     @{currentUser.username}
                   </p>
                   <span
-                    className={`mt-1 inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
+                    className={`mt-1 inline-block rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
                       ROLE_BADGE[currentUser.role] ??
                       "bg-slate-100 text-slate-600"
                     }`}
@@ -446,21 +633,20 @@ export function Layout({ children }: { children: ReactNode }) {
                 <DropdownMenuSeparator />
                 {currentUser.role === "admin" && (
                   <DropdownMenuItem onClick={() => navigate("/admin/users")}>
-                    <Users className="w-4 h-4 mr-2" /> Manage Users
+                    <Users className="mr-2 h-4 w-4" /> Manage Users
                   </DropdownMenuItem>
                 )}
                 <DropdownMenuItem
                   onClick={handleLogout}
                   className="text-destructive focus:text-destructive"
                 >
-                  <LogOut className="w-4 h-4 mr-2" /> Sign Out
+                  <LogOut className="mr-2 h-4 w-4" /> Sign Out
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           )}
         </header>
 
-        {/* Page content */}
         <main className="flex-1 px-4 py-6 md:px-8 md:py-7">
           <div className="mx-auto max-w-7xl">{children}</div>
         </main>

@@ -38,11 +38,46 @@ import type { Item } from "@workspace/api-client-react";
 import { parseSpokenNumber, parseVoiceCountConfirmation, parseVoiceInventoryCommand } from "@/lib/voice-count-workflow";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+const LIST_PAGE_SIZE = 50;
 const LARGE_DELTA_MULTIPLIER = 2;
 const LARGE_DELTA_MIN_UNITS = 20;
 const VOICE_COUNT_TTS_ENABLED = import.meta.env.VITE_VOICE_COUNT_TTS_ENABLED === "true";
 const VOICE_COUNT_CONFIRMATION_AUDIO_ENABLED =
   import.meta.env.VITE_VOICE_COUNT_CONFIRMATION_AUDIO_ENABLED !== "false";
+
+function listPageCount(total: number) {
+  return Math.max(1, Math.ceil(total / LIST_PAGE_SIZE));
+}
+
+function ResultsPager({
+  page,
+  total,
+  onPageChange,
+}: {
+  page: number;
+  total: number;
+  onPageChange: (page: number) => void;
+}) {
+  if (total <= LIST_PAGE_SIZE) return null;
+  const pages = listPageCount(total);
+  const safePage = Math.min(page, pages);
+  const start = (safePage - 1) * LIST_PAGE_SIZE + 1;
+  const end = Math.min(total, safePage * LIST_PAGE_SIZE);
+
+  return (
+    <div className="flex items-center justify-between gap-3 border-t border-border px-4 py-3 text-xs text-muted-foreground">
+      <span>Showing {start}-{end} of {total}</span>
+      <div className="flex items-center gap-2">
+        <Button variant="outline" size="sm" className="h-8 px-3" disabled={safePage <= 1} onClick={() => onPageChange(Math.max(1, safePage - 1))}>
+          Previous
+        </Button>
+        <Button variant="outline" size="sm" className="h-8 px-3" disabled={safePage >= pages} onClick={() => onPageChange(Math.min(pages, safePage + 1))}>
+          Next
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 type LocationOption = { id: number; name: string; slug: string };
 
@@ -355,14 +390,23 @@ async function parseWithAI(
   }
 }
 
-async function saveAdjustment(itemId: number, quantity: number, adjustmentType: string, verified: boolean) {
+async function saveAdjustment(
+  itemId: number,
+  quantity: number,
+  adjustmentType: string,
+  verified: boolean,
+  expectedQuantity?: number,
+) {
   const res = await fetch(`${BASE}/api/items/${itemId}/adjust`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ quantity, adjustmentType, verified }),
+    body: JSON.stringify({ quantity, adjustmentType, verified, expectedQuantity }),
   });
-  if (!res.ok) throw new Error("Failed to save voice adjustment");
+  if (!res.ok) {
+    const message = await res.json().then((body) => body?.error).catch(() => null);
+    throw new Error(typeof message === "string" ? message : "Failed to save voice adjustment");
+  }
 }
 
 async function logVerification(item: Item) {
@@ -419,6 +463,7 @@ export default function VoiceCheck() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [queuedItems, setQueuedItems] = useState<Item[]>([]);
   const [sessionResults, setSessionResults] = useState<SessionResult[]>([]);
+  const [resultsPage, setResultsPage] = useState(1);
   const [statusMessage, setStatusMessage] = useState("");
   const [lastHeard, setLastHeard] = useState("");
   const [voiceNotice, setVoiceNotice] = useState("");
@@ -977,7 +1022,7 @@ export default function VoiceCheck() {
             break itemLoop;
           }
           try {
-            await saveAdjustment(item.id, counted, "Adjustment", false);
+            await saveAdjustment(item.id, counted, "Adjustment", false, item.quantity);
           } catch {
             await logVoiceAuditEvent({
               eventType: "save_failed",
@@ -1025,7 +1070,7 @@ export default function VoiceCheck() {
             break itemLoop;
           }
           try {
-            await saveAdjustment(item.id, counted, reason, false);
+            await saveAdjustment(item.id, counted, reason, false, item.quantity);
           } catch {
             setPendingCounted(null);
             await logVoiceAuditEvent({
@@ -1301,7 +1346,7 @@ export default function VoiceCheck() {
           }
           setStatusMessage(`Saving ${item.name}, count ${quantity} as an adjustment...`);
           try {
-            await saveAdjustment(item.id, quantity, "Adjustment", false);
+            await saveAdjustment(item.id, quantity, "Adjustment", false, item.quantity);
           } catch {
             logVoiceStep("custom.save.failed", { item: item.name, quantity, operation: "adjust-higher" });
             await logVoiceAuditEvent({
@@ -1351,7 +1396,7 @@ export default function VoiceCheck() {
           }
           setStatusMessage(`Saving ${item.name}, count ${quantity}, reason ${reason}...`);
           try {
-            await saveAdjustment(item.id, quantity, reason, false);
+            await saveAdjustment(item.id, quantity, reason, false, item.quantity);
           } catch {
             logVoiceStep("custom.save.failed", { item: item.name, quantity, reason, operation: "adjust-lower" });
             setPendingCounted(null);
@@ -1435,6 +1480,7 @@ export default function VoiceCheck() {
     resetVoiceSession();
     sessionResultsRef.current = [];
     setSessionResults([]);
+    setResultsPage(1);
     setVoiceDebugEntries([]);
     logVoiceStep("start.clicked", {
       countMode,
@@ -1552,6 +1598,7 @@ export default function VoiceCheck() {
     setSelectedCategory("");
     setSessionResults([]);
     sessionResultsRef.current = [];
+    setResultsPage(1);
     setCurrentIndex(0);
     setPendingCounted(null);
     setQueuedItems([]);
@@ -1590,6 +1637,9 @@ export default function VoiceCheck() {
   const summarySkipped = sessionSummary.skipped;
 
   const queueSize = buildQueue().length;
+  const safeResultsPage = Math.min(resultsPage, listPageCount(sessionResults.length));
+  const resultsPageStart = (safeResultsPage - 1) * LIST_PAGE_SIZE;
+  const visibleSessionResults = sessionResults.slice(resultsPageStart, resultsPageStart + LIST_PAGE_SIZE);
   const voiceCaptureLabel =
     voiceCapture?.state === "requesting-microphone"
       ? "Opening microphone..."
@@ -2436,8 +2486,8 @@ export default function VoiceCheck() {
                   <p className="text-sm font-bold">All Results</p>
                 </div>
                 <div className="divide-y divide-border">
-                  {sessionResults.map((r, idx) => (
-                    <div key={idx} className="flex items-center gap-3 px-4 py-3">
+                  {visibleSessionResults.map((r, idx) => (
+                    <div key={resultsPageStart + idx} className="flex items-center gap-3 px-4 py-3">
                       {r.status === "verified" && <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />}
                       {(r.status === "updated-lower" || r.status === "updated-higher") && (
                         <AlertCircle className="w-4 h-4 text-amber-500 shrink-0" />
@@ -2470,6 +2520,7 @@ export default function VoiceCheck() {
                     </div>
                   ))}
                 </div>
+                <ResultsPager page={resultsPage} total={sessionResults.length} onPageChange={setResultsPage} />
               </div>
             )}
           </div>

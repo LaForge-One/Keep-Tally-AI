@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+const LIST_PAGE_SIZE = 50;
 
 const ALL_LOCATIONS = [...LOCATIONS, "Warehouse"] as const;
 
@@ -425,7 +426,7 @@ export default function ScanPage() {
                             <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Par Level</p>
                           </div>
                           <div className="p-3 text-center">
-                            {result.otherItems.map((o) => (
+                            {result.otherItems.slice(0, LIST_PAGE_SIZE).map((o) => (
                               <div key={o.id}>
                                 <p className="text-2xl font-black text-blue-600">{o.quantity}</p>
                                 <p className="text-[10px] text-muted-foreground uppercase tracking-wide truncate">{o.location}</p>

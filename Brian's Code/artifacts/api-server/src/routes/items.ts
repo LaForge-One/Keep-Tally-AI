@@ -764,16 +764,19 @@ router.post("/items/:id/adjust", requirePermission("mark_adjustments"), async (r
     return;
   }
 
-  const { quantity, adjustmentType, verified } = req.body as {
-    quantity: number;
-    adjustmentType: string;
-    verified: boolean;
-  };
+  const schema = z.object({
+    quantity: z.number().int().min(0),
+    adjustmentType: z.string().trim().min(1),
+    verified: z.boolean().optional().default(false),
+    expectedQuantity: z.number().int().min(0).optional(),
+  });
 
-  if (typeof quantity !== "number" || !adjustmentType) {
-    res.status(400).json({ error: "quantity and adjustmentType are required" });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.flatten() });
     return;
   }
+  const { quantity, adjustmentType, verified, expectedQuantity } = parsed.data;
 
   const before = await findAccountItem(req, id);
   if (!before) {
@@ -785,10 +788,21 @@ router.post("/items/:id/adjust", requirePermission("mark_adjustments"), async (r
   const [updated] = await db
     .update(itemsTable)
     .set({ quantity, lastUpdated: new Date() })
-    .where(and(eq(itemsTable.id, id), eq(itemsTable.accountId, req.account!.id)))
+    .where(
+      and(
+        eq(itemsTable.id, id),
+        eq(itemsTable.accountId, req.account!.id),
+        expectedQuantity === undefined ? undefined : eq(itemsTable.quantity, expectedQuantity),
+      ),
+    )
     .returning();
   if (!updated) {
-    res.status(500).json({ error: "Failed to update item" });
+    res.status(expectedQuantity === undefined ? 500 : 409).json({
+      error:
+        expectedQuantity === undefined
+          ? "Failed to update item"
+          : "Item quantity changed before this adjustment could be saved. Reload and try again.",
+    });
     return;
   }
 
