@@ -801,7 +801,7 @@ export default function WarehousePage() {
                 onClick={() => navigate("/warehouse/voice")}
               >
                 <Mic className="w-4 h-4 mr-1.5" />
-                Voice Count
+                Tally
               </Button>
             )}
             {canEditWarehouse && (

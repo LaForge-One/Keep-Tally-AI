@@ -8,6 +8,153 @@ export type VoiceCountSaveDecision = {
   status: VoiceCountResultStatus;
 };
 
+export type VoiceInventoryItemLike = {
+  name: string;
+  quantity: number;
+};
+
+export type VoiceInventoryCommandResult<TItem extends VoiceInventoryItemLike> =
+  | { status: "none" }
+  | { status: "ambiguous"; candidates: TItem[] }
+  | { status: "match"; item: TItem; quantity: number };
+
+const SPOKEN_NUMBER_WORDS: Record<string, number> = {
+  zero: 0,
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  six: 6,
+  seven: 7,
+  eight: 8,
+  nine: 9,
+  ten: 10,
+  eleven: 11,
+  twelve: 12,
+  dozen: 12,
+  thirteen: 13,
+  fourteen: 14,
+  fifteen: 15,
+  sixteen: 16,
+  seventeen: 17,
+  eighteen: 18,
+  nineteen: 19,
+  twenty: 20,
+  thirty: 30,
+  forty: 40,
+  fifty: 50,
+  sixty: 60,
+  seventy: 70,
+  eighty: 80,
+  ninety: 90,
+  hundred: 100,
+};
+
+const QUANTITY_FILLER_RE =
+  /\b(about|around|approximately|roughly|only|just|left|remaining|on hand|in stock|count|counted|quantity|qty|there are|there is|i have|we have)\b/g;
+
+export function parseSpokenNumber(transcript: string): number | null {
+  const normalized = transcript
+    .toLowerCase()
+    .replace(/-/g, " ")
+    .replace(QUANTITY_FILLER_RE, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const digitMatch = normalized.match(/\b(\d+)\b/);
+  if (digitMatch) return Number.parseInt(digitMatch[1]!, 10);
+
+  const words = normalized.split(/\s+/).filter(Boolean);
+  for (let i = 0; i < words.length; i += 1) {
+    const current = SPOKEN_NUMBER_WORDS[words[i]!];
+    if (current === undefined) continue;
+
+    const next = SPOKEN_NUMBER_WORDS[words[i + 1]!];
+    if (words[i] === "two" && words[i + 1] === "dozen") return 24;
+    if (words[i] === "three" && words[i + 1] === "dozen") return 36;
+    if (next !== undefined && current >= 20 && current < 100 && next < 10) {
+      return current + next;
+    }
+    if (words[i + 1] === "hundred" && current > 0 && current < 10) {
+      const afterHundred = SPOKEN_NUMBER_WORDS[words[i + 2]!];
+      return current * 100 + (afterHundred && afterHundred < 100 ? afterHundred : 0);
+    }
+    return current;
+  }
+
+  return null;
+}
+
+function normalizeVoiceText(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function stripQuantityWords(value: string): string {
+  const numberWords = Object.keys(SPOKEN_NUMBER_WORDS).join("|");
+  return normalizeVoiceText(value)
+    .replace(/\b\d+\b/g, " ")
+    .replace(new RegExp(`\\b(${numberWords})\\b`, "g"), " ")
+    .replace(QUANTITY_FILLER_RE, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function rankVoiceItemMatches<TItem extends VoiceInventoryItemLike>(
+  query: string,
+  items: readonly TItem[],
+): Array<{ item: TItem; score: number }> {
+  const normalizedQuery = normalizeVoiceText(query);
+  if (!normalizedQuery) return [];
+
+  const queryWords = normalizedQuery.split(/\s+/).filter((word) => word.length > 1);
+  const ranked: Array<{ item: TItem; score: number }> = [];
+
+  for (const item of items) {
+    const normalizedName = normalizeVoiceText(item.name);
+    const itemWords = normalizedName.split(/\s+/).filter((word) => word.length > 1);
+    let score = 0;
+
+    if (normalizedName === normalizedQuery) {
+      score = 110;
+    } else if (normalizedName.includes(normalizedQuery) || normalizedQuery.includes(normalizedName)) {
+      score = (Math.min(normalizedName.length, normalizedQuery.length) / Math.max(normalizedName.length, normalizedQuery.length)) * 100;
+    } else {
+      const matchCount = queryWords.filter((queryWord) =>
+        itemWords.some((itemWord) => itemWord.includes(queryWord) || queryWord.includes(itemWord)),
+      ).length;
+      score = queryWords.length > 0 ? (matchCount / queryWords.length) * 100 : 0;
+    }
+
+    if (score >= 40) ranked.push({ item, score });
+  }
+
+  return ranked.sort((a, b) => b.score - a.score);
+}
+
+export function parseVoiceInventoryCommand<TItem extends VoiceInventoryItemLike>(
+  transcript: string,
+  items: readonly TItem[],
+): VoiceInventoryCommandResult<TItem> {
+  const quantity = parseSpokenNumber(transcript);
+  if (quantity === null) return { status: "none" };
+
+  const itemQuery = stripQuantityWords(transcript);
+  const ranked = rankVoiceItemMatches(itemQuery || transcript, items);
+  if (ranked.length === 0) return { status: "none" };
+
+  const [best, second] = ranked;
+  if (second && best!.score < 90 && Math.abs(best!.score - second.score) < 12) {
+    return { status: "ambiguous", candidates: ranked.slice(0, 3).map((match) => match.item) };
+  }
+
+  return { status: "match", item: best!.item, quantity };
+}
+
 export function parseVoiceCountConfirmation(transcript: string): ConfirmationChoice {
   const t = transcript.toLowerCase().trim();
   if (!t) return "unknown";

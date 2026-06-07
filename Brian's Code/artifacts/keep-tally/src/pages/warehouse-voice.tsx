@@ -195,9 +195,9 @@ const MODE_LABELS: Record<CountMode, string> = {
 };
 
 const MODE_DESCS: Record<CountMode, string> = {
-  "all": "Count every item in the warehouse",
+  "all": "Tally every item in the warehouse",
   "low-stock": "Focus on items below min par or out of stock",
-  "category": "Count a single product category",
+  "category": "Tally a single product category",
   "ai": "Say any item name and count freely",
 };
 
@@ -358,7 +358,7 @@ export default function WarehouseVoice() {
     } else if (controlRef.current.shouldPause) {
       setPhase("paused");
     } else {
-      await speak("Warehouse count complete.");
+      await speak("Warehouse tally complete.");
       setPhase("complete");
     }
   }, [safeSpeak, safeListen, addResult, speak, acquireWakeLock, releaseWakeLock]);
@@ -414,7 +414,7 @@ export default function WarehouseVoice() {
     if (controlRef.current.shouldPause) {
       setPhase("paused");
     } else {
-      await speak("Count complete.");
+      await speak("Tally complete.");
       setPhase("complete");
     }
   }, [safeSpeak, safeListen, addResult, speak, acquireWakeLock, releaseWakeLock]);
@@ -951,12 +951,13 @@ export default function WarehouseVoice() {
           <div>
             <h1 className="text-3xl font-extrabold tracking-tight flex items-center gap-2">
               <Mic className="w-7 h-7 text-primary" />
-              Warehouse Count
+              Tally
             </h1>
             <p className="text-muted-foreground mt-0.5 text-sm">
-              {phase === "setup" && "Hands-free inventory audit for the warehouse."}
-              {phase === "select-mode" && "Choose your count mode."}
-              {phase === "complete" && "Count session complete."}
+              {phase === "setup" && "Use AI voice to tally warehouse inventory or add new warehouse items."}
+              {phase === "select-mode" && !countMode && "Choose how you want to tally existing inventory."}
+              {phase === "select-mode" && countMode && "Review and start your tally."}
+              {phase === "complete" && "Tally session complete."}
             </p>
           </div>
         </div>
@@ -973,18 +974,44 @@ export default function WarehouseVoice() {
 
         {/* ── STEP 1: Mode select ── */}
         {phase === "setup" && (
-          <div className="bg-card border border-border rounded-2xl shadow-sm p-6 space-y-6 max-w-md mx-auto">
+          <div className="bg-card border border-border rounded-2xl shadow-sm p-6 space-y-6 max-w-2xl mx-auto">
             <div className="text-center space-y-1">
               <div className="w-20 h-20 bg-primary/10 rounded-full flex items-center justify-center mx-auto">
                 <Warehouse className="w-10 h-10 text-primary" />
               </div>
-              <h2 className="text-xl font-bold mt-3">Warehouse Voice Count</h2>
+              <h2 className="text-xl font-bold mt-3">Tally</h2>
               <p className="text-sm text-muted-foreground">
-                Speak your physical counts — KeepTally updates the system hands-free.
+                Pick a voice workflow. Tally counts existing warehouse stock, while Add Item creates new warehouse inventory only.
               </p>
             </div>
 
-            <div className="space-y-3">
+            <div className="grid gap-4 md:grid-cols-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setCountMode(null);
+                  setSelectedCategory("");
+                  setPhase("select-mode");
+                }}
+                className="rounded-2xl border-2 border-primary/30 bg-primary/5 p-5 text-left transition-all hover:border-primary/60 hover:bg-primary/10 active:scale-[0.98]"
+              >
+                <div className="flex items-start gap-4">
+                  <div className="w-12 h-12 rounded-2xl bg-primary text-primary-foreground flex items-center justify-center shrink-0">
+                    <Mic className="w-6 h-6" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="font-extrabold text-base">Start Tally</p>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Speak item names and counts. KeepTally verifies matching counts or updates warehouse quantities after confirmation.
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-5 flex items-center justify-between text-sm font-bold text-primary">
+                  <span>Choose tally mode</span>
+                  <ChevronRight className="w-4 h-4" />
+                </div>
+              </button>
+
               <div className="rounded-xl border border-border bg-background p-4 space-y-3">
                 <div className="flex items-start gap-3">
                   <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary shrink-0">
@@ -1049,7 +1076,22 @@ export default function WarehouseVoice() {
                   <p className="text-xs text-muted-foreground">You need warehouse edit permission to create warehouse items.</p>
                 )}
               </div>
+            </div>
+          </div>
+        )}
 
+        {/* ── STEP 2A: Count mode select ── */}
+        {phase === "select-mode" && !countMode && (
+          <div className="bg-card border border-border rounded-2xl shadow-sm p-6 space-y-5 max-w-md mx-auto">
+            <div className="text-center space-y-1">
+              <div className="w-14 h-14 bg-primary/10 rounded-full flex items-center justify-center mx-auto text-primary">
+                <Mic className="w-7 h-7" />
+              </div>
+              <h2 className="text-xl font-bold mt-2">Start Tally</h2>
+              <p className="text-sm text-muted-foreground">Choose how KeepTally should guide the warehouse count.</p>
+            </div>
+
+            <div className="space-y-3">
               {(["all", "low-stock", "category", "ai"] as CountMode[]).map((mode) => (
                 <button
                   key={mode}
@@ -1074,10 +1116,18 @@ export default function WarehouseVoice() {
                 </button>
               ))}
             </div>
+
+            <Button
+              variant="outline"
+              className="w-full h-12 rounded-xl font-bold"
+              onClick={() => setPhase("setup")}
+            >
+              Back to Tally
+            </Button>
           </div>
         )}
 
-        {/* ── STEP 2: Confirm / Category select ── */}
+        {/* ── STEP 2B: Confirm / Category select ── */}
         {phase === "select-mode" && countMode && (
           <div className="bg-card border border-border rounded-2xl shadow-sm p-6 space-y-5 max-w-md mx-auto">
             <div className="text-center space-y-1">
@@ -1109,7 +1159,7 @@ export default function WarehouseVoice() {
               <div className="text-center py-3 bg-muted/30 rounded-xl">
                 <p className="text-4xl font-black text-primary tabular-nums">{queueSize}</p>
                 <p className="text-sm text-muted-foreground mt-0.5">
-                  {queueSize === 1 ? "item" : "items"} in this count
+                  {queueSize === 1 ? "item" : "items"} in this tally
                 </p>
               </div>
             )}
@@ -1130,7 +1180,7 @@ export default function WarehouseVoice() {
               className="w-full h-14 rounded-2xl text-base font-bold"
             >
               <Mic className="w-5 h-5 mr-2" />
-              Start Count
+              Start Tally
             </Button>
           </div>
         )}
@@ -1144,7 +1194,7 @@ export default function WarehouseVoice() {
                 <CheckCircle2 className="w-10 h-10 text-emerald-600" />
               </div>
               <div>
-                <h2 className="text-2xl font-extrabold">Count Complete</h2>
+                <h2 className="text-2xl font-extrabold">Tally Complete</h2>
                 <p className="text-muted-foreground text-sm mt-1">{sessionResults.length} items processed</p>
               </div>
               <div className="grid grid-cols-3 gap-3 pt-2">
@@ -1202,7 +1252,7 @@ export default function WarehouseVoice() {
 
             <div className="grid grid-cols-2 gap-3">
               <Button variant="outline" className="h-14 rounded-2xl font-bold" onClick={resetSession}>
-                <RotateCcw className="w-4 h-4 mr-2" /> Count Again
+                <RotateCcw className="w-4 h-4 mr-2" /> Tally Again
               </Button>
               <Button className="h-14 rounded-2xl font-bold" onClick={() => navigate("/warehouse")}>
                 <Warehouse className="w-4 h-4 mr-2" /> Warehouse

@@ -76,7 +76,7 @@ const PERMISSION_LABELS: Record<string, string> = {
   view_warehouse: "View Warehouse",
   edit_store_inventory: "Edit Store Inventory",
   scan_barcodes: "Scan Barcodes",
-  use_voice_mode: "Use Voice Count Mode",
+  use_voice_mode: "Use Tally Mode",
   mark_adjustments: "Mark Theft / Spoilage / Adjustments",
   view_all_locations: "View All Locations",
 };
