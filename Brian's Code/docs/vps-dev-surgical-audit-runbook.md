@@ -24,6 +24,8 @@ DEV_ADMIN_PASSWORD='YOUR_DEV_ADMIN_PASSWORD' \
 corepack pnpm run audit:dev
 ```
 
+Replace `YOUR_DEV_ADMIN_PASSWORD` with the actual dev admin password. The audit runner refuses to continue when that placeholder is left in place because every authenticated check would fail with `401`.
+
 If the dev admin password is still the bootstrap value, use:
 
 ```bash

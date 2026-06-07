@@ -104,6 +104,77 @@ function stripQuantityWords(value: string): string {
     .trim();
 }
 
+function parseNumberPhrase(words: readonly string[]): number | null {
+  if (words.length === 0 || words.length > 3) return null;
+  const phrase = words.join(" ");
+  const digitOnly = phrase.match(/^\d+$/);
+  if (digitOnly) return Number.parseInt(digitOnly[0], 10);
+  if (words.length === 1) return SPOKEN_NUMBER_WORDS[words[0]!] ?? null;
+  if (words.length === 2) {
+    if (words[0] === "two" && words[1] === "dozen") return 24;
+    if (words[0] === "three" && words[1] === "dozen") return 36;
+    const first = SPOKEN_NUMBER_WORDS[words[0]!];
+    const second = SPOKEN_NUMBER_WORDS[words[1]!];
+    if (first !== undefined && second !== undefined && first >= 20 && first < 100 && second < 10) {
+      return first + second;
+    }
+    if (words[1] === "hundred" && first !== undefined && first > 0 && first < 10) {
+      return first * 100;
+    }
+  }
+  if (words.length === 3 && words[1] === "hundred") {
+    const first = SPOKEN_NUMBER_WORDS[words[0]!];
+    const third = SPOKEN_NUMBER_WORDS[words[2]!];
+    if (first !== undefined && third !== undefined && first > 0 && first < 10 && third < 100) {
+      return first * 100 + third;
+    }
+  }
+  return null;
+}
+
+function stripQuantityFiller(value: string): string {
+  return normalizeVoiceText(value)
+    .replace(QUANTITY_FILLER_RE, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractInventoryCommandParts(transcript: string): { itemQuery: string; quantity: number; quantityPosition: "leading" | "trailing" | "unknown" } | null {
+  const normalized = stripQuantityFiller(transcript);
+  const words = normalized.split(/\s+/).filter(Boolean);
+  if (words.length === 0) return null;
+
+  for (let length = Math.min(3, words.length - 1); length >= 1; length -= 1) {
+    const quantity = parseNumberPhrase(words.slice(words.length - length));
+    if (quantity !== null) {
+      return {
+        quantity,
+        itemQuery: words.slice(0, words.length - length).join(" "),
+        quantityPosition: "trailing",
+      };
+    }
+  }
+
+  for (let length = Math.min(3, words.length - 1); length >= 1; length -= 1) {
+    const quantity = parseNumberPhrase(words.slice(0, length));
+    if (quantity !== null) {
+      return {
+        quantity,
+        itemQuery: words.slice(length).join(" "),
+        quantityPosition: "leading",
+      };
+    }
+  }
+
+  const quantity = parseSpokenNumber(transcript);
+  if (quantity === null) return null;
+  return {
+    quantity,
+    itemQuery: stripQuantityWords(transcript),
+    quantityPosition: "unknown",
+  };
+}
+
 function rankVoiceItemMatches<TItem extends VoiceInventoryItemLike>(
   query: string,
   items: readonly TItem[],
@@ -140,19 +211,31 @@ export function parseVoiceInventoryCommand<TItem extends VoiceInventoryItemLike>
   transcript: string,
   items: readonly TItem[],
 ): VoiceInventoryCommandResult<TItem> {
-  const quantity = parseSpokenNumber(transcript);
-  if (quantity === null) return { status: "none" };
+  const commandParts = extractInventoryCommandParts(transcript);
+  if (!commandParts) return { status: "none" };
 
-  const itemQuery = stripQuantityWords(transcript);
-  const ranked = rankVoiceItemMatches(itemQuery || transcript, items);
+  const ranked = rankVoiceItemMatches(commandParts.itemQuery || transcript, items);
   if (ranked.length === 0) return { status: "none" };
 
   const [best, second] = ranked;
+  const normalizedItemQuery = normalizeVoiceText(commandParts.itemQuery);
+  const secondName = second ? normalizeVoiceText(second.item.name) : "";
+  if (
+    second &&
+    commandParts.quantityPosition === "trailing" &&
+    best!.score >= 100 &&
+    normalizedItemQuery.length > 0 &&
+    second.score >= 60 &&
+    secondName !== normalizedItemQuery &&
+    secondName.includes(normalizedItemQuery)
+  ) {
+    return { status: "ambiguous", candidates: ranked.slice(0, 3).map((match) => match.item) };
+  }
   if (second && best!.score < 90 && Math.abs(best!.score - second.score) < 12) {
     return { status: "ambiguous", candidates: ranked.slice(0, 3).map((match) => match.item) };
   }
 
-  return { status: "match", item: best!.item, quantity };
+  return { status: "match", item: best!.item, quantity: commandParts.quantity };
 }
 
 export function parseVoiceCountConfirmation(transcript: string): ConfirmationChoice {

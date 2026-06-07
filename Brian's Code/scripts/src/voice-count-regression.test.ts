@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   decideVoiceCountSave,
+  parseSpokenNumber,
   parseVoiceCountConfirmation,
+  parseVoiceInventoryCommand,
 } from "../../artifacts/keep-tally/src/lib/voice-count-workflow";
 
 test("voice count confirmation accepts clear verbal affirmations", () => {
@@ -84,4 +86,52 @@ test("voice count save decision updates changed counts after affirmation", () =>
     action: "adjust",
     status: "updated-lower",
   });
+});
+
+const voiceItems = [
+  { id: 1, name: "Coke Zero", quantity: 4 },
+  { id: 2, name: "Coke Classic", quantity: 6 },
+  { id: 3, name: "Red Bull", quantity: 8 },
+  { id: 4, name: "Red Bull Zero", quantity: 2 },
+];
+
+test("spoken number parser handles compact inventory phrases", () => {
+  assert.equal(parseSpokenNumber("only two left"), 2);
+  assert.equal(parseSpokenNumber("about twelve"), 12);
+  assert.equal(parseSpokenNumber("two dozen"), 24);
+  assert.equal(parseSpokenNumber("twenty one"), 21);
+});
+
+test("voice inventory parser matches item then quantity", () => {
+  const result = parseVoiceInventoryCommand("Coke Zero five", voiceItems);
+  assert.equal(result.status, "match");
+  if (result.status !== "match") return;
+  assert.equal(result.item.name, "Coke Zero");
+  assert.equal(result.quantity, 5);
+});
+
+test("voice inventory parser matches quantity then item", () => {
+  const result = parseVoiceInventoryCommand("three Red Bull", voiceItems);
+  assert.equal(result.status, "match");
+  if (result.status !== "match") return;
+  assert.equal(result.item.name, "Red Bull");
+  assert.equal(result.quantity, 3);
+});
+
+test("voice inventory parser handles count wording", () => {
+  const result = parseVoiceInventoryCommand("Coke Zero count is five", voiceItems);
+  assert.equal(result.status, "match");
+  if (result.status !== "match") return;
+  assert.equal(result.item.name, "Coke Zero");
+  assert.equal(result.quantity, 5);
+});
+
+test("voice inventory parser asks for clarification on ambiguous names", () => {
+  const result = parseVoiceInventoryCommand("Red Bull three", voiceItems);
+  assert.equal(result.status, "ambiguous");
+  if (result.status !== "ambiguous") return;
+  assert.deepEqual(
+    result.candidates.map((item) => item.name),
+    ["Red Bull", "Red Bull Zero"],
+  );
 });

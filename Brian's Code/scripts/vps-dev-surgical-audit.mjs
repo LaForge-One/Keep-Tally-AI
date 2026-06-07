@@ -333,6 +333,16 @@ console.log(`loadRequests=${loadRequests}`);
 console.log(`loadConcurrency=${loadConcurrency}`);
 console.log(`slowMs=${slowMs}`);
 
+if (password === "YOUR_DEV_ADMIN_PASSWORD") {
+  console.error("");
+  console.error("Refusing to run authenticated audit with the literal placeholder password.");
+  console.error("Set DEV_ADMIN_PASSWORD to the real dev admin password, or use INITIAL_ADMIN_PASSWORD if this database still uses the bootstrap password.");
+  console.error("");
+  console.error("Example:");
+  console.error("BASE_URL=http://127.0.0.1:3100 DEV_ADMIN_USERNAME=admin DEV_ADMIN_PASSWORD='real-password' corepack pnpm run audit:dev");
+  process.exit(1);
+}
+
 await expect("bootstrap: web root", "GET", "/", { auth: false, expected: [200, 302] });
 await expect("bootstrap: health", "GET", "/api/healthz", { auth: false, expected: [200, 302] });
 await login();
