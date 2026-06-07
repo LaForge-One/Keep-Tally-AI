@@ -457,7 +457,7 @@ export default function VoiceCheck() {
   const voiceSupport = getAIVoiceSupport();
 
   const [phase, setPhase] = useState<Phase>("setup");
-  const [countMode, setCountMode] = useState<CountMode | null>(null);
+  const [countMode, setCountMode] = useState<CountMode | null>("custom");
   const [selectedCategory, setSelectedCategory] = useState<string>("");
 
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -1511,7 +1511,7 @@ export default function VoiceCheck() {
       const ready = await runMicPrecheck();
       if (!ready) {
         logVoiceStep("start.blocked", "Microphone precheck failed.");
-        setPhase("select-mode");
+        setPhase(countMode === "custom" ? "setup" : "select-mode");
         setStatusMessage("");
         return;
       }
@@ -1594,7 +1594,7 @@ export default function VoiceCheck() {
 
   const resetSession = useCallback(() => {
     setPhase("setup");
-    setCountMode(null);
+    setCountMode("custom");
     setSelectedCategory("");
     setSessionResults([]);
     sessionResultsRef.current = [];
@@ -2111,7 +2111,7 @@ export default function VoiceCheck() {
         <div className="flex items-center gap-3">
           <button
             onClick={() => {
-              if (phase === "select-mode") { setPhase("setup"); setCountMode(null); }
+              if (phase === "select-mode") { setPhase("setup"); setCountMode("custom"); }
               else { navigate("/inventory"); }
             }}
             className="p-2 rounded-lg hover:bg-muted/60 text-muted-foreground transition-colors"
@@ -2124,8 +2124,8 @@ export default function VoiceCheck() {
               Count Mode
             </h1>
             <p className="text-muted-foreground mt-0.5 text-sm">
-              {phase === "setup" && "Pick a location to begin."}
-              {phase === "select-mode" && "Choose how you want to count."}
+              {phase === "setup" && "Pick a location once, then start a continuous Tally session."}
+              {phase === "select-mode" && "Optional structured count modes."}
               {phase === "complete" && "Session complete."}
             </p>
           </div>
@@ -2208,16 +2208,16 @@ export default function VoiceCheck() {
           </div>
         )}
 
-        {/* ── STEP 1: Location ── */}
+        {/* ── Fast path: location + Tally start ── */}
         {phase === "setup" && (
           <div className="bg-card border border-border rounded-2xl shadow-sm p-6 space-y-6 max-w-md mx-auto">
             <div className="text-center space-y-1">
               <div className="w-20 h-20 bg-primary/10 rounded-full flex items-center justify-center mx-auto">
                 <Mic className="w-10 h-10 text-primary" />
               </div>
-              <h2 className="text-xl font-bold mt-3">Select Location</h2>
+              <h2 className="text-xl font-bold mt-3">Start Tally</h2>
               <p className="text-sm text-muted-foreground">
-                Pick a location, then choose your count mode.
+                Choose the location, then speak item names and counts in one continuous loop.
               </p>
             </div>
 
@@ -2227,7 +2227,7 @@ export default function VoiceCheck() {
                 value={sessionLocation ?? ""}
                 onValueChange={(val) => {
                   setSessionLocation(val);
-                  setCountMode(null);
+                  setCountMode("custom");
                   setSelectedCategory("");
                 }}
               >
@@ -2263,12 +2263,29 @@ export default function VoiceCheck() {
 
             <Button
               className="w-full h-14 text-base font-bold rounded-xl"
+              disabled={!sessionLocation || locationsLoading || itemsLoading || !hasItems}
+              onClick={handleStart}
+            >
+              <Wand2 className="w-5 h-5 mr-2" />
+              {aiStatus?.configured === false ? "Start Offline Tally" : "Start AI Tally"}
+            </Button>
+
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full h-11 rounded-xl"
               disabled={!sessionLocation || locationsLoading || itemsLoading}
               onClick={() => setPhase("select-mode")}
             >
-              Next
-              <ChevronRight className="w-5 h-5 ml-1" />
+              Structured count options
+              <ChevronRight className="w-4 h-4 ml-1" />
             </Button>
+
+            <div className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-xs text-muted-foreground">
+              Say <span className="font-semibold text-foreground">"Coke Zero 5"</span>, confirm with{" "}
+              <span className="font-semibold text-foreground">"yes"</span>, then keep going. Say{" "}
+              <span className="font-semibold text-foreground">"done"</span> to finish.
+            </div>
           </div>
         )}
 

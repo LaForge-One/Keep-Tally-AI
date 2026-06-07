@@ -12,7 +12,6 @@ import {
   LogOut,
   Map,
   Menu,
-  Mic,
   Package,
   Search,
   Settings,
@@ -138,7 +137,6 @@ function SidebarNav({
       >
         {nav.map((item) => {
           const active = isActive(item.path);
-          const isVoice = item.path === "/voice-check";
 
           return (
             <div key={item.path}>
@@ -174,13 +172,7 @@ function SidebarNav({
                   transition: "background 150ms ease, color 150ms ease",
                   ...(active
                     ? { background: "#eaf2fb", color: "#446fa7" }
-                    : isVoice
-                      ? {
-                          background:
-                            "linear-gradient(135deg,rgba(68,111,167,.13),rgba(68,111,167,.07))",
-                          color: "#446fa7",
-                        }
-                      : { color: "#5b6f88" }),
+                    : { color: "#5b6f88" }),
                 }}
               >
                 <item.icon
@@ -193,22 +185,6 @@ function SidebarNav({
                   aria-hidden="true"
                 />
                 <span className="truncate">{item.label}</span>
-                {isVoice && !active && (
-                  <span
-                    style={{
-                      marginLeft: "auto",
-                      borderRadius: 4,
-                      background: "#eaf2fb",
-                      color: "#446fa7",
-                      padding: "2px 6px",
-                      fontSize: 9,
-                      fontWeight: 900,
-                      letterSpacing: "0.04em",
-                    }}
-                  >
-                    PRIMARY
-                  </span>
-                )}
               </Link>
             </div>
           );
@@ -332,7 +308,6 @@ export function Layout({ children }: { children: ReactNode }) {
     (summary?.belowParCount ?? 0) + (summary?.outOfStockCount ?? 0);
 
   const nav: NavItem[] = [
-    { path: "/voice-check", label: "Voice Inventory", icon: Mic },
     { path: "/", label: "Dashboard", icon: LayoutDashboard },
     {
       path: "/inventory",

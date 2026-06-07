@@ -81,6 +81,10 @@ type DetailData = {
   item: WarehouseItem;
   purchases: Purchase[];
   transfers: Transfer[];
+  pagination?: {
+    purchases: { page: number; pageSize: number; total: number };
+    transfers: { page: number; pageSize: number; total: number };
+  };
   vendorPricing: VendorPricing[];
   pricing: { latest: number | null; avg: number | null; lowest: number | null };
 };
@@ -392,9 +396,13 @@ export default function WarehouseDetailPage() {
   const [transferPage, setTransferPage] = useState(1);
 
   const { data, isLoading, refetch } = useQuery({
-    queryKey: ["warehouse-detail", id],
+    queryKey: ["warehouse-detail", id, purchasePage, transferPage],
     queryFn: async () => {
-      const res = await fetch(`${BASE}/api/warehouse/${id}`);
+      const params = new URLSearchParams({
+        purchasePage: String(purchasePage),
+        transferPage: String(transferPage),
+      });
+      const res = await fetch(`${BASE}/api/warehouse/${id}?${params.toString()}`);
       if (!res.ok) throw new Error("Not found");
       return res.json() as Promise<DetailData>;
     },
@@ -411,10 +419,12 @@ export default function WarehouseDetailPage() {
   if (!data) return <Layout><div className="text-center py-20 text-muted-foreground">Item not found</div></Layout>;
 
   const { item, purchases, transfers, vendorPricing, pricing } = data;
+  const purchaseTotal = data.pagination?.purchases.total ?? purchases.length;
+  const transferTotal = data.pagination?.transfers.total ?? transfers.length;
   const pctFull = item.maxPar > 0 ? Math.min(100, (item.quantity / item.maxPar) * 100) : null;
   const pagedVendorPricing = listPageItems(vendorPricing, vendorPage);
-  const pagedPurchases = listPageItems(purchases, purchasePage);
-  const pagedTransfers = listPageItems(transfers, transferPage);
+  const pagedPurchases = purchases;
+  const pagedTransfers = transfers;
 
   return (
     <Layout>
@@ -560,10 +570,10 @@ export default function WarehouseDetailPage() {
         )}
 
         {/* Purchase History */}
-        {canViewCosts && purchases.length > 0 && (
+        {canViewCosts && purchaseTotal > 0 && (
           <div className="bg-card border border-border rounded-2xl overflow-hidden">
             <div className="px-4 py-3 border-b border-border flex items-center justify-between">
-              <h3 className="font-semibold text-sm flex items-center gap-2"><Truck className="w-4 h-4 text-primary" />Purchase History ({purchases.length})</h3>
+              <h3 className="font-semibold text-sm flex items-center gap-2"><Truck className="w-4 h-4 text-primary" />Purchase History ({purchaseTotal})</h3>
               <button onClick={() => navigate("/warehouse/purchases")} className="text-xs text-primary font-semibold hover:underline">View all</button>
             </div>
             <div className="divide-y divide-border">
@@ -583,15 +593,15 @@ export default function WarehouseDetailPage() {
                 </div>
               ))}
             </div>
-            <ListPager page={purchasePage} total={purchases.length} onPageChange={setPurchasePage} />
+            <ListPager page={purchasePage} total={purchaseTotal} onPageChange={setPurchasePage} />
           </div>
         )}
 
         {/* Transfer History */}
-        {transfers.length > 0 && (
+        {transferTotal > 0 && (
           <div className="bg-card border border-border rounded-2xl overflow-hidden">
             <div className="px-4 py-3 border-b border-border">
-              <h3 className="font-semibold text-sm flex items-center gap-2"><ArrowRightLeft className="w-4 h-4 text-primary" />Transfer History ({transfers.length})</h3>
+              <h3 className="font-semibold text-sm flex items-center gap-2"><ArrowRightLeft className="w-4 h-4 text-primary" />Transfer History ({transferTotal})</h3>
             </div>
             <div className="divide-y divide-border">
               {pagedTransfers.map((t) => (
@@ -605,7 +615,7 @@ export default function WarehouseDetailPage() {
                 </div>
               ))}
             </div>
-            <ListPager page={transferPage} total={transfers.length} onPageChange={setTransferPage} />
+            <ListPager page={transferPage} total={transferTotal} onPageChange={setTransferPage} />
           </div>
         )}
 

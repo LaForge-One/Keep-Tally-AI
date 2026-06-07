@@ -115,12 +115,12 @@ export async function convertToWav(audioBuffer: Buffer): Promise<Buffer> {
  */
 export async function ensureCompatibleFormat(
   audioBuffer: Buffer
-): Promise<{ buffer: Buffer; format: "wav" | "mp3" }> {
+): Promise<{ buffer: Buffer; format: "wav" | "mp3"; detected: AudioFormat; converted: boolean }> {
   const detected = detectAudioFormat(audioBuffer);
-  if (detected === "wav") return { buffer: audioBuffer, format: "wav" };
-  if (detected === "mp3") return { buffer: audioBuffer, format: "mp3" };
+  if (detected === "wav") return { buffer: audioBuffer, format: "wav", detected, converted: false };
+  if (detected === "mp3") return { buffer: audioBuffer, format: "mp3", detected, converted: false };
   const wavBuffer = await convertToWav(audioBuffer);
-  return { buffer: wavBuffer, format: "wav" };
+  return { buffer: wavBuffer, format: "wav", detected, converted: true };
 }
 
 /** Voice Chat: audio-in, audio-out. */
@@ -232,13 +232,14 @@ export async function textToSpeechStream(
 /** Speech-to-Text using the configured transcription model. */
 export async function speechToText(
   audioBuffer: Buffer,
-  format: "wav" | "mp3" | "webm" = "wav"
+  format: "wav" | "mp3" | "webm" = "wav",
+  prompt = "Inventory terms may include product names, counts, route names, warehouse names, par levels, theft, spoilage, comp, damaged, and missing from bin.",
 ): Promise<string> {
   const file = await toFile(audioBuffer, `audio.${format}`);
   const response = await openai.audio.transcriptions.create({
     file,
     model: TRANSCRIBE_MODEL,
-    prompt: "Inventory terms may include product names, counts, route names, warehouse names, par levels, theft, spoilage, comp, damaged, and missing from bin.",
+    prompt,
   });
   return response.text;
 }
