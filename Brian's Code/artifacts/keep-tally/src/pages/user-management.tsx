@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Layout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
@@ -38,6 +38,7 @@ import {
 } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+const LIST_PAGE_SIZE = 50;
 
 const ROLE_LABELS: Record<string, string> = {
   admin: "Admin",
@@ -104,6 +105,7 @@ export default function UserManagementPage() {
   const [editUser, setEditUser] = useState<User | null>(null);
   const [resetUser, setResetUser] = useState<User | null>(null);
   const [newPassword, setNewPassword] = useState("");
+  const [page, setPage] = useState(1);
 
   // Add user form state
   const [form, setForm] = useState({
@@ -168,6 +170,17 @@ export default function UserManagementPage() {
     onError: (err: Error) => toast({ title: "Error", description: err.message, variant: "destructive" }),
   });
 
+  const users = usersData?.users ?? [];
+  const permissions = permsData?.permissions ?? {};
+  const permissionKeys = permsData?.permissionKeys ?? [];
+  const totalUserPages = Math.max(1, Math.ceil(users.length / LIST_PAGE_SIZE));
+  const userPageStart = (page - 1) * LIST_PAGE_SIZE;
+  const pageUsers = useMemo(() => users.slice(userPageStart, userPageStart + LIST_PAGE_SIZE), [users, userPageStart]);
+
+  useEffect(() => {
+    setPage((current) => Math.min(current, totalUserPages));
+  }, [totalUserPages]);
+
   if (!currentUser || currentUser.role !== "admin") {
     return (
       <Layout>
@@ -179,10 +192,6 @@ export default function UserManagementPage() {
       </Layout>
     );
   }
-
-  const users = usersData?.users ?? [];
-  const permissions = permsData?.permissions ?? {};
-  const permissionKeys = permsData?.permissionKeys ?? [];
 
   function toggleLocation(loc: string, currentLocs: string[], setLocs: (l: string[]) => void) {
     if (currentLocs.includes(loc)) {
@@ -216,7 +225,7 @@ export default function UserManagementPage() {
           {/* ── USERS TAB ── */}
           <TabsContent value="users" className="mt-4 flex flex-col gap-3">
             {usersLoading && <p className="text-muted-foreground text-sm">Loading users…</p>}
-            {users.map((user) => (
+            {pageUsers.map((user) => (
               <Card key={user.id} className={`transition-opacity ${!user.active ? "opacity-60" : ""}`}>
                 <CardContent className="flex items-start gap-3 py-4">
                   <div className="flex-1 min-w-0">
@@ -260,6 +269,24 @@ export default function UserManagementPage() {
                 </CardContent>
               </Card>
             ))}
+            {!usersLoading && users.length > 0 && (
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-xs text-muted-foreground">
+                  Showing {userPageStart + 1}-{Math.min(userPageStart + LIST_PAGE_SIZE, users.length)} of {users.length} users
+                </p>
+                {totalUserPages > 1 && (
+                  <div className="flex items-center justify-end gap-2">
+                    <Button variant="outline" size="sm" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={page <= 1}>
+                      Previous
+                    </Button>
+                    <span className="text-xs font-medium text-muted-foreground">Page {page} of {totalUserPages}</span>
+                    <Button variant="outline" size="sm" onClick={() => setPage((current) => Math.min(totalUserPages, current + 1))} disabled={page >= totalUserPages}>
+                      Next
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
           </TabsContent>
 
           {/* ── PERMISSIONS TAB ── */}

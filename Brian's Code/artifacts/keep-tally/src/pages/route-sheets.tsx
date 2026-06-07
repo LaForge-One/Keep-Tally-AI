@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Layout } from "@/components/layout";
 import { PageHeader } from "@/components/page-header";
@@ -14,6 +14,7 @@ import { LOCATIONS } from "@/contexts/location-context";
 import { useToast } from "@/hooks/use-toast";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+const LIST_PAGE_SIZE = 50;
 
 type RouteSheetSummary = {
   id: number;
@@ -159,6 +160,7 @@ export default function RouteSheetsPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<RouteSheetForm>(blankSheet());
+  const [page, setPage] = useState(1);
 
   const { data: sheets = [], isLoading } = useQuery<RouteSheetSummary[]>({
     queryKey: ["route-sheets"],
@@ -173,6 +175,13 @@ export default function RouteSheetsPage() {
     () => [...form.stops].sort((a, b) => a.routeOrder - b.routeOrder),
     [form.stops],
   );
+  const totalPages = Math.max(1, Math.ceil(sheets.length / LIST_PAGE_SIZE));
+  const pageStart = (page - 1) * LIST_PAGE_SIZE;
+  const pageSheets = useMemo(() => sheets.slice(pageStart, pageStart + LIST_PAGE_SIZE), [sheets, pageStart]);
+
+  useEffect(() => {
+    setPage((current) => Math.min(current, totalPages));
+  }, [totalPages]);
 
   function updateField<K extends keyof RouteSheetForm>(key: K, value: RouteSheetForm[K]) {
     setForm((current) => ({ ...current, [key]: value }));
@@ -307,7 +316,7 @@ export default function RouteSheetsPage() {
                   No route sheets yet.
                 </TableCell>
               </TableRow>
-            ) : sheets.map((sheet) => (
+            ) : pageSheets.map((sheet) => (
               <TableRow key={sheet.id}>
                 <TableCell className="font-medium">{sheet.routeName}</TableCell>
                 <TableCell>{sheet.routeDate}</TableCell>
@@ -325,6 +334,24 @@ export default function RouteSheetsPage() {
           </TableBody>
         </Table>
       </div>
+      {!isLoading && sheets.length > 0 && (
+        <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-xs text-muted-foreground">
+            Showing {pageStart + 1}-{Math.min(pageStart + LIST_PAGE_SIZE, sheets.length)} of {sheets.length} route sheets
+          </p>
+          {totalPages > 1 && (
+            <div className="flex items-center justify-end gap-2">
+              <Button variant="outline" size="sm" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={page <= 1}>
+                Previous
+              </Button>
+              <span className="text-xs font-medium text-muted-foreground">Page {page} of {totalPages}</span>
+              <Button variant="outline" size="sm" onClick={() => setPage((current) => Math.min(totalPages, current + 1))} disabled={page >= totalPages}>
+                Next
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">

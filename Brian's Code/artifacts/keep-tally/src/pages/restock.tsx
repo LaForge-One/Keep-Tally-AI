@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Layout } from "@/components/layout";
 import { PageHeader } from "@/components/page-header";
 import { useGetRestockList } from "@workspace/api-client-react";
@@ -18,12 +18,15 @@ import { useSelectedLocation } from "@/contexts/location-context";
 import { useLocation as useWouterLocation } from "wouter";
 import { useAuth } from "@/contexts/auth-context";
 
+const LIST_PAGE_SIZE = 50;
+
 export default function RestockPage() {
   const { hasPermission } = useAuth();
   const canImport = hasPermission("edit_store_inventory");
 
   const { selectedLocation } = useSelectedLocation();
   const [, navigate] = useWouterLocation();
+  const [page, setPage] = useState(1);
   const { data, isLoading } = useGetRestockList(
     selectedLocation ? { location: selectedLocation } : undefined,
   );
@@ -44,6 +47,39 @@ export default function RestockPage() {
         unitsNeeded: entries.reduce((acc, e) => acc + e.unitsNeeded, 0),
       }));
   }, [data]);
+
+  const sortedEntries = useMemo(() => {
+    return (data?.entries ?? [])
+      .slice()
+      .sort((a, b) => {
+        const categorySort = a.item.category.localeCompare(b.item.category);
+        return categorySort !== 0 ? categorySort : b.unitsNeeded - a.unitsNeeded;
+      });
+  }, [data]);
+  const totalPages = Math.max(1, Math.ceil(sortedEntries.length / LIST_PAGE_SIZE));
+  const pageStart = (page - 1) * LIST_PAGE_SIZE;
+  const pageEntries = sortedEntries.slice(pageStart, pageStart + LIST_PAGE_SIZE);
+  const pageGrouped = useMemo(() => {
+    const map = new Map<string, typeof pageEntries>();
+    for (const entry of pageEntries) {
+      const key = entry.item.category;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(entry);
+    }
+    return Array.from(map.entries()).map(([category, entries]) => ({
+      category,
+      entries,
+      unitsNeeded: entries.reduce((acc, e) => acc + e.unitsNeeded, 0),
+    }));
+  }, [pageEntries]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [selectedLocation]);
+
+  useEffect(() => {
+    setPage((current) => Math.min(current, totalPages));
+  }, [totalPages]);
 
   const csvHref = selectedLocation
     ? `${import.meta.env.BASE_URL}api/restock.csv?location=${encodeURIComponent(selectedLocation)}`
@@ -104,7 +140,7 @@ export default function RestockPage() {
           </div>
         ) : (
           <div className="space-y-5">
-            {grouped.map((group) => (
+            {pageGrouped.map((group) => (
               <section key={group.category}>
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2">
@@ -170,6 +206,24 @@ export default function RestockPage() {
                 </div>
               </section>
             ))}
+            {sortedEntries.length > 0 && (
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-xs text-muted-foreground">
+                  Showing {pageStart + 1}-{Math.min(pageStart + LIST_PAGE_SIZE, sortedEntries.length)} of {sortedEntries.length} restock items
+                </p>
+                {totalPages > 1 && (
+                  <div className="flex items-center justify-end gap-2">
+                    <Button variant="outline" size="sm" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={page <= 1}>
+                      Previous
+                    </Button>
+                    <span className="text-xs font-medium text-muted-foreground">Page {page} of {totalPages}</span>
+                    <Button variant="outline" size="sm" onClick={() => setPage((current) => Math.min(totalPages, current + 1))} disabled={page >= totalPages}>
+                      Next
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>

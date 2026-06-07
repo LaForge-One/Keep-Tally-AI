@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { Layout } from "@/components/layout";
@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+const LIST_PAGE_SIZE = 50;
 
 type Purchase = {
   id: number;
@@ -81,6 +82,7 @@ export default function WarehousePurchasesPage() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [activeTab, setActiveTab] = useState<"list" | "vendors">("list");
+  const [page, setPage] = useState(1);
 
   const params = new URLSearchParams();
   if (vendorFilter) params.set("vendor", vendorFilter);
@@ -119,6 +121,18 @@ export default function WarehousePurchasesPage() {
         (p.notes ?? "").toLowerCase().includes(s)
     );
   }, [purchases, search]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / LIST_PAGE_SIZE));
+  const pageStart = (page - 1) * LIST_PAGE_SIZE;
+  const pagePurchases = filtered.slice(pageStart, pageStart + LIST_PAGE_SIZE);
+
+  useEffect(() => {
+    setPage(1);
+  }, [search, vendorFilter, dateFrom, dateTo, activeTab]);
+
+  useEffect(() => {
+    setPage((current) => Math.min(current, totalPages));
+  }, [totalPages]);
 
   const hasFilters = vendorFilter || dateFrom || dateTo || search;
   const exportHref = `${BASE}/api/warehouse/purchases/export`;
@@ -246,7 +260,7 @@ export default function WarehousePurchasesPage() {
 
           {hasFilters && (
             <p className="text-xs text-muted-foreground">
-              Showing {filtered.length} of {purchases.length} records
+              {filtered.length} of {purchases.length} records match filters
               {vendorFilter && ` · ${vendorFilter}`}
               {(dateFrom || dateTo) && ` · ${dateFrom || "…"} → ${dateTo || "…"}`}
             </p>
@@ -290,7 +304,7 @@ export default function WarehousePurchasesPage() {
               </div>
             ) : (
               <div className="bg-card border border-border rounded-2xl overflow-hidden divide-y divide-border">
-                {filtered.map((p) => (
+                {pagePurchases.map((p) => (
                   <div
                     key={p.id}
                     onClick={() => navigate(`/warehouse/${p.warehouseItemId}`)}
@@ -323,6 +337,24 @@ export default function WarehousePurchasesPage() {
                     <ChevronRight className="w-4 h-4 text-muted-foreground/40 shrink-0" />
                   </div>
                 ))}
+              </div>
+            )}
+            {filtered.length > 0 && (
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-xs text-muted-foreground">
+                  Showing {pageStart + 1}-{Math.min(pageStart + LIST_PAGE_SIZE, filtered.length)} of {filtered.length} purchase records
+                </p>
+                {totalPages > 1 && (
+                  <div className="flex items-center justify-end gap-2">
+                    <Button variant="outline" size="sm" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={page <= 1}>
+                      Previous
+                    </Button>
+                    <span className="text-xs font-medium text-muted-foreground">Page {page} of {totalPages}</span>
+                    <Button variant="outline" size="sm" onClick={() => setPage((current) => Math.min(totalPages, current + 1))} disabled={page >= totalPages}>
+                      Next
+                    </Button>
+                  </div>
+                )}
               </div>
             )}
           </>

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useLocation as useWouterLocation } from "wouter";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Layout } from "@/components/layout";
@@ -53,6 +53,7 @@ import { useCurrentUser } from "@/contexts/auth-context";
 import { format } from "date-fns";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+const LIST_PAGE_SIZE = 50;
 
 type OrderView = "active" | "archived" | "completed" | "deleted" | "all";
 
@@ -116,6 +117,7 @@ export default function OrdersPage() {
   const isAdmin = currentUser?.role === "admin";
 
   const [activeView, setActiveView] = useState<OrderView>("active");
+  const [page, setPage] = useState(1);
   const [showNewDialog, setShowNewDialog] = useState(false);
   const [newLocation, setNewLocation] = useState<string>("");
   const [creating, setCreating] = useState(false);
@@ -241,6 +243,18 @@ export default function OrdersPage() {
     all: "No pick lists found.",
   };
 
+  const totalPages = Math.max(1, Math.ceil(orders.length / LIST_PAGE_SIZE));
+  const pageStart = (page - 1) * LIST_PAGE_SIZE;
+  const pageOrders = useMemo(() => orders.slice(pageStart, pageStart + LIST_PAGE_SIZE), [orders, pageStart]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [activeView]);
+
+  useEffect(() => {
+    setPage((current) => Math.min(current, totalPages));
+  }, [totalPages]);
+
   return (
     <Layout>
       {isLoading ? (
@@ -314,7 +328,7 @@ export default function OrdersPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {orders.map((order) => {
+                    {pageOrders.map((order) => {
                       const isDeleted = !!order.deletedAt;
                       const isArchived = !!order.archivedAt;
                       return (
@@ -443,6 +457,24 @@ export default function OrdersPage() {
                 </Table>
               )}
             </div>
+            {orders.length > 0 && (
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-xs text-muted-foreground">
+                  Showing {pageStart + 1}-{Math.min(pageStart + LIST_PAGE_SIZE, orders.length)} of {orders.length} orders
+                </p>
+                {totalPages > 1 && (
+                  <div className="flex items-center justify-end gap-2">
+                    <Button variant="outline" size="sm" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={page <= 1}>
+                      Previous
+                    </Button>
+                    <span className="text-xs font-medium text-muted-foreground">Page {page} of {totalPages}</span>
+                    <Button variant="outline" size="sm" onClick={() => setPage((current) => Math.min(totalPages, current + 1))} disabled={page >= totalPages}>
+                      Next
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* New Order dialog */}

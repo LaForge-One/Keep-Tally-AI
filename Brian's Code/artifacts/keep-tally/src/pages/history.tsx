@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Layout } from "@/components/layout";
 import { PageHeader } from "@/components/page-header";
 import { useListHistory } from "@workspace/api-client-react";
@@ -7,6 +7,7 @@ import { TerminalSquare, MousePointerClick, ArrowRight, History, Search } from "
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -23,6 +24,8 @@ const ACTION_CONFIG: Record<string, { label: string; className: string }> = {
   command: { label: "Command", className: "bg-sky-100 text-sky-700 border-sky-200" },
   delete: { label: "Delete", className: "bg-red-100 text-red-700 border-red-200" },
 };
+
+const LIST_PAGE_SIZE = 50;
 
 function ActionBadge({ action }: { action: string }) {
   const cfg = ACTION_CONFIG[action] ?? { label: action, className: "bg-muted text-muted-foreground border-border" };
@@ -57,6 +60,7 @@ type HistoryEntry = {
 export default function HistoryPage() {
   const { data: history, isLoading } = useListHistory();
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
 
   const filtered = useMemo(() => {
     const entries = (history ?? []) as HistoryEntry[];
@@ -70,6 +74,18 @@ export default function HistoryPage() {
         e.location?.toLowerCase().includes(q),
     );
   }, [history, search]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / LIST_PAGE_SIZE));
+  const pageStart = (page - 1) * LIST_PAGE_SIZE;
+  const pageEntries = filtered.slice(pageStart, pageStart + LIST_PAGE_SIZE);
+
+  useEffect(() => {
+    setPage(1);
+  }, [search]);
+
+  useEffect(() => {
+    setPage((current) => Math.min(current, totalPages));
+  }, [totalPages]);
 
   return (
     <Layout>
@@ -121,7 +137,7 @@ export default function HistoryPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filtered.map((entry) => (
+                {pageEntries.map((entry) => (
                   <TableRow key={entry.id}>
                     <TableCell className="pl-4 text-xs text-muted-foreground tabular-nums whitespace-nowrap">
                       {format(new Date(entry.createdAt), "MMM d, h:mm a")}
@@ -192,9 +208,23 @@ export default function HistoryPage() {
         </div>
 
         {!isLoading && filtered.length > 0 && (
-          <p className="text-xs text-muted-foreground text-right">
-            {search ? `${filtered.length} of ${history?.length ?? 0} entries` : `${filtered.length} entries`}
-          </p>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs text-muted-foreground">
+              Showing {pageStart + 1}-{Math.min(pageStart + LIST_PAGE_SIZE, filtered.length)} of {filtered.length} entries
+              {search ? ` (${history?.length ?? 0} total)` : ""}
+            </p>
+            {totalPages > 1 && (
+              <div className="flex items-center justify-end gap-2">
+                <Button variant="outline" size="sm" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={page <= 1}>
+                  Previous
+                </Button>
+                <span className="text-xs font-medium text-muted-foreground">Page {page} of {totalPages}</span>
+                <Button variant="outline" size="sm" onClick={() => setPage((current) => Math.min(totalPages, current + 1))} disabled={page >= totalPages}>
+                  Next
+                </Button>
+              </div>
+            )}
+          </div>
         )}
       </div>
     </Layout>

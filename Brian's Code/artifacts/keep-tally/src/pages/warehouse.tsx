@@ -644,7 +644,7 @@ export default function WarehousePage() {
   const [categoryFilter, setCategoryFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("");
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(100);
+  const [pageSize, setPageSize] = useState(50);
   const [showNewDialog, setShowNewDialog] = useState(false);
   const [editItem, setEditItem] = useState<WarehouseItem | null>(null);
   const [deleteItem, setDeleteItem] = useState<WarehouseItem | null>(null);
@@ -878,7 +878,7 @@ export default function WarehousePage() {
           </p>
           <div className="flex items-center gap-2">
             <span className="text-xs text-muted-foreground">Show:</span>
-            {([50, 100, 250, 500, 0] as const).map((size) => (
+            {([50] as const).map((size) => (
               <button
                 key={size}
                 onClick={() => setPageSize(size)}

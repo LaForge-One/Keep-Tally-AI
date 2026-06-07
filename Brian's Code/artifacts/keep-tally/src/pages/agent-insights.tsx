@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { ElementType } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Layout } from "@/components/layout";
@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+const LIST_PAGE_SIZE = 50;
 
 type RecommendationSeverity = "critical" | "warning" | "info";
 type RecommendationType = "store_restock" | "store_overstock" | "warehouse_reorder";
@@ -158,6 +159,7 @@ export default function AgentInsightsPage() {
   ]);
   const [chatLoading, setChatLoading] = useState(false);
   const [chatError, setChatError] = useState("");
+  const [page, setPage] = useState(1);
 
   const { data, isLoading, isFetching, refetch, error } = useQuery<HousekeepingResponse>({
     queryKey: ["agent-housekeeping"],
@@ -170,16 +172,27 @@ export default function AgentInsightsPage() {
     refetchInterval: 60_000,
   });
 
+  const totalRecommendations = data?.recommendations.length ?? 0;
+  const totalPages = Math.max(1, Math.ceil(totalRecommendations / LIST_PAGE_SIZE));
+  const pageStart = (page - 1) * LIST_PAGE_SIZE;
+  const pageRecommendations = useMemo(
+    () => (data?.recommendations ?? []).slice(pageStart, pageStart + LIST_PAGE_SIZE),
+    [data?.recommendations, pageStart],
+  );
+
+  useEffect(() => {
+    setPage((current) => Math.min(current, totalPages));
+  }, [totalPages]);
+
   const grouped = useMemo(() => {
     const map = new Map<RecommendationType, AgentRecommendation[]>();
-    for (const rec of data?.recommendations ?? []) {
+    for (const rec of pageRecommendations) {
       if (!map.has(rec.type)) map.set(rec.type, []);
       map.get(rec.type)!.push(rec);
     }
     return Array.from(map.entries()).map(([type, recs]) => ({ type, recs }));
-  }, [data]);
+  }, [pageRecommendations]);
 
-  const totalRecommendations = data?.recommendations.length ?? 0;
   const agentConnected = Boolean(data && !error);
 
   const sendMessage = async (event?: FormEvent) => {
@@ -437,6 +450,22 @@ export default function AgentInsightsPage() {
                 </section>
               );
             })}
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-xs text-muted-foreground">
+                Showing {pageStart + 1}-{Math.min(pageStart + LIST_PAGE_SIZE, totalRecommendations)} of {totalRecommendations} recommendations
+              </p>
+              {totalPages > 1 && (
+                <div className="flex items-center justify-end gap-2">
+                  <Button variant="outline" size="sm" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={page <= 1}>
+                    Previous
+                  </Button>
+                  <span className="text-xs font-medium text-muted-foreground">Page {page} of {totalPages}</span>
+                  <Button variant="outline" size="sm" onClick={() => setPage((current) => Math.min(totalPages, current + 1))} disabled={page >= totalPages}>
+                    Next
+                  </Button>
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>
