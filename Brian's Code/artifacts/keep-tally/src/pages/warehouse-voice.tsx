@@ -1079,7 +1079,7 @@ export default function WarehouseVoice() {
                     <PackagePlus className="w-5 h-5" />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className="font-bold text-sm">Add Warehouse Item by Voice</p>
+                    <p className="font-bold text-sm">Add to Warehouse by Voice</p>
                     <p className="text-xs text-muted-foreground">
                       Create new inventory in the warehouse first. Store locations receive it later by transfer.
                     </p>
@@ -1131,7 +1131,7 @@ export default function WarehouseVoice() {
                   onClick={handleWarehouseVoiceAddItem}
                 >
                   <PackagePlus className="w-4 h-4 mr-2" />
-                  {warehouseAddItemBusy ? "Listening for Warehouse Item..." : "Add Warehouse Item by Voice"}
+                  {warehouseAddItemBusy ? "Listening for Warehouse Item..." : "Add to Warehouse by Voice"}
                 </Button>
                 {!hasPermission("edit_warehouse") && (
                   <p className="text-xs text-muted-foreground">You need warehouse edit permission to create warehouse items.</p>

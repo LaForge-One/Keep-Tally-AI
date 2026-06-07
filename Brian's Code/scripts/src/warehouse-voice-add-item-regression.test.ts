@@ -114,7 +114,7 @@ test("regression guard keeps add-item voice creation warehouse-only", () => {
   assert.match(voiceRoute, /\/voice\/warehouse\/add-item\/draft/);
   assert.doesNotMatch(voiceRoute, /router\.post\(\s*["']\/voice\/add-item\/draft/);
   assert.doesNotMatch(storeVoicePage, /Add Item by Voice/);
-  assert.match(warehouseVoicePage, /Add Warehouse Item by Voice/);
+  assert.match(warehouseVoicePage, /Add to Warehouse by Voice/);
   assert.match(warehouseVoicePage, /\/api\/warehouse/);
   assert.match(warehouseVoicePage, /useAIVoice/);
   assert.doesNotMatch(warehouseVoicePage, /@\/hooks\/use-voice/);
