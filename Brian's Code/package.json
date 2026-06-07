@@ -8,6 +8,7 @@
     "health": "node scripts/dev-health.mjs",
     "status": "node scripts/dev-status.mjs",
     "smoke": "node scripts/dev-smoke.mjs",
+    "audit:dev": "node scripts/vps-dev-surgical-audit.mjs",
     "workflow:test": "node scripts/dev-workflow-test.mjs",
     "test:voice-count": "corepack pnpm --filter @workspace/scripts run test:voice-count",
     "test:warehouse-voice-add-item": "corepack pnpm --filter @workspace/scripts run test:warehouse-voice-add-item",
