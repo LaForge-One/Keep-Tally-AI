@@ -22,6 +22,7 @@ import {
   ClipboardList,
   Map,
   Mic,
+  Package,
   ScanLine,
   Warehouse,
 } from "lucide-react";
