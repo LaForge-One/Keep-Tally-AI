@@ -35,7 +35,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Search, Plus, MoreHorizontal, Edit, Trash2, Package, SlidersHorizontal, ScanLine, Upload } from "lucide-react";
+import { Search, MoreHorizontal, Edit, Trash2, Package, SlidersHorizontal, ScanLine, Upload } from "lucide-react";
 import { ItemDialog } from "@/components/item-dialog";
 import { AdjustmentModal } from "@/components/adjustment-modal";
 import { InventoryScanner } from "@/components/inventory-scanner";
@@ -154,7 +154,6 @@ export default function Inventory() {
     setPage((current) => Math.min(current, totalPages));
   }, [totalPages]);
 
-  const openCreate = () => { setEditingItem(undefined); setDialogOpen(true); };
   const openEdit = (item: Item) => { setEditingItem(item); setDialogOpen(true); };
   const openAdjust = (item: Item) => { setAdjustingItem(item); setAdjustOpen(true); };
   const confirmDelete = (id: number) => { setItemToDelete(id); setDeleteConfirmOpen(true); };
@@ -192,12 +191,6 @@ export default function Inventory() {
                 >
                   <Upload className="w-4 h-4 mr-1.5" />
                   Import Sales
-                </Button>
-              )}
-              {canEditInventory && (
-                <Button onClick={openCreate} size="sm">
-                  <Plus className="w-4 h-4 mr-1.5" />
-                  Add Item
                 </Button>
               )}
             </div>
