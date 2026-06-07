@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request } from "express";
-import { asc, eq } from "drizzle-orm";
+import { asc, desc, eq } from "drizzle-orm";
 import OpenAI from "openai";
 import { z } from "zod";
 import {
@@ -37,17 +37,49 @@ type AgentRecommendation = {
   recommendedPurchaseQty?: number;
   message: string;
 };
+type LocationInsight = {
+  location: string;
+  itemCount: number;
+  totalQuantity: number;
+  belowMinimumCount: number;
+  outOfStockCount: number;
+  overstockCount: number;
+  deficitUnits: number;
+  recommendedTransferUnits: number;
+};
+type ItemInsight = {
+  itemId: number;
+  itemName: string;
+  location: string;
+  quantity: number;
+  minQuantity: number;
+  maxQuantity: number;
+  category: string;
+  status: ReturnType<typeof storeStatus>;
+};
+type ShrinkageInsight = {
+  totalRecentEvents: number;
+  byReason: Array<{ reason: string; count: number }>;
+  byLocation: Array<{ location: string; count: number }>;
+  recentExamples: Array<{ itemName: string; location: string | null; reason: string; note: string | null }>;
+};
 type HousekeepingSummary = {
   belowMinimumCount: number;
   overstockCount: number;
   warehouseReorderCount: number;
   recentChangeCount: number;
+  outOfStockCount: number;
+  locationCount: number;
+  shrinkageEventCount: number;
 };
 type HousekeepingContext = {
   generatedAt: string;
   mode: "read_only";
   summary: HousekeepingSummary;
   recommendations: AgentRecommendation[];
+  locationInsights: LocationInsight[];
+  lowestStockItems: ItemInsight[];
+  shrinkage: ShrinkageInsight;
 };
 
 const ConversationSchema = z.object({
@@ -84,6 +116,105 @@ function recommendedTransfer(item: typeof itemsTable.$inferSelect) {
   return Math.max(0, item.maxQuantity - item.quantity);
 }
 
+function buildLocationInsights(storeItems: Array<typeof itemsTable.$inferSelect>): LocationInsight[] {
+  const byLocation = new Map<string, LocationInsight>();
+
+  for (const item of storeItems) {
+    const current = byLocation.get(item.location) ?? {
+      location: item.location,
+      itemCount: 0,
+      totalQuantity: 0,
+      belowMinimumCount: 0,
+      outOfStockCount: 0,
+      overstockCount: 0,
+      deficitUnits: 0,
+      recommendedTransferUnits: 0,
+    };
+    const status = storeStatus(item);
+    current.itemCount += 1;
+    current.totalQuantity += item.quantity;
+    if (status === "out") current.outOfStockCount += 1;
+    if (status === "out" || status === "below_minimum") {
+      current.belowMinimumCount += 1;
+      current.deficitUnits += Math.max(0, item.minQuantity - item.quantity);
+      current.recommendedTransferUnits += recommendedTransfer(item);
+    }
+    if (status === "overstock") current.overstockCount += 1;
+    byLocation.set(item.location, current);
+  }
+
+  return Array.from(byLocation.values()).sort((a, b) => {
+    const riskDelta = b.belowMinimumCount + b.outOfStockCount - (a.belowMinimumCount + a.outOfStockCount);
+    if (riskDelta !== 0) return riskDelta;
+    const deficitDelta = b.deficitUnits - a.deficitUnits;
+    if (deficitDelta !== 0) return deficitDelta;
+    return a.totalQuantity - b.totalQuantity;
+  });
+}
+
+function buildLowestStockItems(storeItems: Array<typeof itemsTable.$inferSelect>): ItemInsight[] {
+  return storeItems
+    .map((item): ItemInsight => ({
+      itemId: item.id,
+      itemName: item.name,
+      location: item.location,
+      quantity: item.quantity,
+      minQuantity: item.minQuantity,
+      maxQuantity: item.maxQuantity,
+      category: item.category,
+      status: storeStatus(item),
+    }))
+    .sort((a, b) => {
+      const statusRank = (status: ItemInsight["status"]) => status === "out" ? 0 : status === "below_minimum" ? 1 : status === "ok" ? 2 : 3;
+      const rankDelta = statusRank(a.status) - statusRank(b.status);
+      if (rankDelta !== 0) return rankDelta;
+      const quantityDelta = a.quantity - b.quantity;
+      if (quantityDelta !== 0) return quantityDelta;
+      return a.itemName.localeCompare(b.itemName);
+    })
+    .slice(0, 20);
+}
+
+function shrinkageReason(row: typeof historyTable.$inferSelect) {
+  const text = `${row.action ?? ""} ${row.field ?? ""} ${row.note ?? ""}`.toLowerCase();
+  if (/theft|stolen|steal/.test(text)) return "Theft";
+  if (/spoil|expired|bad/.test(text)) return "Spoilage";
+  if (/\bcomp\b|complimentary|gave/.test(text)) return "Comp";
+  if (/return to warehouse|returned to warehouse|send back|sent back/.test(text)) return "Return to Warehouse";
+  if (/damage|damaged|broken|crushed/.test(text)) return "Damaged";
+  if (/missing from bin|missing|not there|empty bin/.test(text)) return "Missing from Bin";
+  if (/shrink|shortage|lower|adjustment/.test(text)) return "Adjustment";
+  return null;
+}
+
+function buildShrinkageInsight(recentHistory: Array<typeof historyTable.$inferSelect>): ShrinkageInsight {
+  const shrinkageRows = recentHistory
+    .map((row) => ({ row, reason: shrinkageReason(row) }))
+    .filter((entry): entry is { row: typeof historyTable.$inferSelect; reason: string } => Boolean(entry.reason));
+  const byReason = new Map<string, number>();
+  const byLocation = new Map<string, number>();
+
+  for (const { row, reason } of shrinkageRows) {
+    byReason.set(reason, (byReason.get(reason) ?? 0) + 1);
+    const location = row.location ?? "Unknown";
+    byLocation.set(location, (byLocation.get(location) ?? 0) + 1);
+  }
+
+  const sortCount = (a: { count: number }, b: { count: number }) => b.count - a.count;
+
+  return {
+    totalRecentEvents: shrinkageRows.length,
+    byReason: Array.from(byReason.entries()).map(([reason, count]) => ({ reason, count })).sort(sortCount),
+    byLocation: Array.from(byLocation.entries()).map(([location, count]) => ({ location, count })).sort(sortCount),
+    recentExamples: shrinkageRows.slice(0, 5).map(({ row, reason }) => ({
+      itemName: row.itemName,
+      location: row.location,
+      reason,
+      note: row.note,
+    })),
+  };
+}
+
 async function buildHousekeepingContext(req: Request): Promise<HousekeepingContext> {
   const allStoreItems = await db
     .select()
@@ -112,8 +243,14 @@ async function buildHousekeepingContext(req: Request): Promise<HousekeepingConte
     .select()
     .from(historyTable)
     .where(eq(historyTable.accountId, req.account!.id))
-    .orderBy(historyTable.createdAt)
+    .orderBy(desc(historyTable.createdAt))
     .limit(100);
+  const visibleHistory = canViewAllLocations(req)
+    ? recentHistory
+    : recentHistory.filter((row) => {
+        if (row.locationId !== null && row.locationId !== undefined && allowedLocationIds.has(row.locationId)) return true;
+        return row.location ? legacyLocations.has(row.location) : false;
+      });
 
   const belowMinimum: AgentRecommendation[] = storeItems
     .filter((item) => storeStatus(item) === "below_minimum" || storeStatus(item) === "out")
@@ -157,6 +294,9 @@ async function buildHousekeepingContext(req: Request): Promise<HousekeepingConte
       recommendedPurchaseQty: Math.max(0, item.maxPar - item.quantity),
       message: `${item.name} warehouse quantity is below reorder range.`,
     }));
+  const locationInsights = buildLocationInsights(storeItems);
+  const lowestStockItems = buildLowestStockItems(storeItems);
+  const shrinkage = buildShrinkageInsight(visibleHistory);
 
   return {
     generatedAt: new Date().toISOString(),
@@ -165,9 +305,15 @@ async function buildHousekeepingContext(req: Request): Promise<HousekeepingConte
       belowMinimumCount: belowMinimum.length,
       overstockCount: overstock.length,
       warehouseReorderCount: warehouseReorder.length,
-      recentChangeCount: recentHistory.length,
+      recentChangeCount: visibleHistory.length,
+      outOfStockCount: belowMinimum.filter((rec) => rec.quantity <= 0).length,
+      locationCount: locationInsights.length,
+      shrinkageEventCount: shrinkage.totalRecentEvents,
     },
     recommendations: [...belowMinimum, ...overstock, ...warehouseReorder].slice(0, 100),
+    locationInsights,
+    lowestStockItems,
+    shrinkage,
   };
 }
 
@@ -178,6 +324,43 @@ function deterministicAgentReply(message: string, context: HousekeepingContext) 
   const overstock = recs.filter((rec) => rec.type === "store_overstock");
   const warehouse = recs.filter((rec) => rec.type === "warehouse_reorder");
   const top = (items: AgentRecommendation[]) => items.slice(0, 5).map((rec) => `- ${rec.message}`).join("\n");
+  const topLocations = context.locationInsights.slice(0, 5).map((location) =>
+    `- ${location.location}: ${location.totalQuantity} units on hand, ${location.belowMinimumCount} below minimum, ${location.outOfStockCount} out of stock, ${location.deficitUnits} units below minimum.`,
+  ).join("\n");
+  const topLowestItems = context.lowestStockItems.slice(0, 5).map((item) =>
+    `- ${item.itemName} at ${item.location}: ${item.quantity} on hand, range ${item.minQuantity}-${item.maxQuantity}, status ${item.status.replace("_", " ")}.`,
+  ).join("\n");
+  const shrinkageReasons = context.shrinkage.byReason.slice(0, 5).map((entry) => `- ${entry.reason}: ${entry.count}`).join("\n");
+  const shrinkageLocations = context.shrinkage.byLocation.slice(0, 5).map((entry) => `- ${entry.location}: ${entry.count}`).join("\n");
+
+  if (/which|what|where|store|location/.test(text) && /lowest|least|low inventory|lowest inventory|weakest/.test(text)) {
+    return context.locationInsights.length
+      ? `Lowest inventory and highest restock-risk locations from the current snapshot:\n${topLocations}`
+      : "I do not see store location inventory in the current read-only snapshot.";
+  }
+
+  if (/risk by store|risk by location|location risk|store risk|summarize.*location/.test(text)) {
+    return context.locationInsights.length
+      ? `Location risk summary:\n${topLocations}`
+      : "I do not see location-level risk in the current read-only snapshot.";
+  }
+
+  if (/what|which|item|product/.test(text) && /lowest|least|out of stock|zero|low stock/.test(text)) {
+    return context.lowestStockItems.length
+      ? `Lowest-stock items from the current snapshot:\n${topLowestItems}`
+      : "I do not see store item inventory in the current read-only snapshot.";
+  }
+
+  if (/shrink|shrinkage|theft|spoilage|damaged|damage|missing|comp|shortage/.test(text)) {
+    if (context.shrinkage.totalRecentEvents === 0) {
+      return "I do not see recent shrinkage-coded events in the current read-only history snapshot.";
+    }
+    return [
+      `Recent shrinkage-coded events found: ${context.shrinkage.totalRecentEvents}.`,
+      shrinkageReasons ? `By reason:\n${shrinkageReasons}` : "",
+      shrinkageLocations ? `By location:\n${shrinkageLocations}` : "",
+    ].filter(Boolean).join("\n");
+  }
 
   if (/warehouse|purchase|buy|reorder/.test(text)) {
     return warehouse.length
@@ -228,6 +411,15 @@ Give concise, practical answers for an operations manager.
 
 Current summary:
 ${JSON.stringify(context.summary)}
+
+Location insights:
+${JSON.stringify(context.locationInsights.slice(0, 20))}
+
+Lowest-stock items:
+${JSON.stringify(context.lowestStockItems.slice(0, 20))}
+
+Shrinkage insight:
+${JSON.stringify(context.shrinkage)}
 
 Current recommendations:
 ${JSON.stringify(compactRecommendations)}`;
