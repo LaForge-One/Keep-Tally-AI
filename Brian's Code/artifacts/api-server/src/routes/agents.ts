@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request } from "express";
-import { asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import OpenAI from "openai";
 import { z } from "zod";
 import {
@@ -57,6 +57,29 @@ type ItemInsight = {
   category: string;
   status: ReturnType<typeof storeStatus>;
 };
+type StockoutSeverity = "warning" | "high" | "critical";
+type StockoutInsight = {
+  itemId: number;
+  itemName: string;
+  location: string;
+  category: string;
+  quantity: number;
+  minQuantity: number;
+  maxQuantity: number;
+  outOfStockSince: string;
+  outOfStockHours: number;
+  outOfStockDays: number;
+  ageLabel: string;
+  severity: StockoutSeverity;
+  evidence: "history_transition" | "last_updated_fallback";
+};
+type LocationStockoutSummary = {
+  location: string;
+  outOfStockCount: number;
+  longestOutOfStockHours: number;
+  longestOutOfStockLabel: string;
+  criticalStockoutCount: number;
+};
 type ShrinkageInsight = {
   totalRecentEvents: number;
   byReason: Array<{ reason: string; count: number }>;
@@ -71,6 +94,7 @@ type HousekeepingSummary = {
   outOfStockCount: number;
   locationCount: number;
   shrinkageEventCount: number;
+  longStockoutCount: number;
 };
 type HousekeepingContext = {
   generatedAt: string;
@@ -79,6 +103,8 @@ type HousekeepingContext = {
   recommendations: AgentRecommendation[];
   locationInsights: LocationInsight[];
   lowestStockItems: ItemInsight[];
+  longestStockouts: StockoutInsight[];
+  locationStockouts: LocationStockoutSummary[];
   shrinkage: ShrinkageInsight;
 };
 
@@ -175,6 +201,101 @@ function buildLowestStockItems(storeItems: Array<typeof itemsTable.$inferSelect>
     .slice(0, 20);
 }
 
+function parseHistoryQuantity(value: string | null) {
+  if (!value) return null;
+  const match = value.match(/-?\d+/);
+  if (!match) return null;
+  const parsed = Number(match[0]);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function stockoutSeverity(hours: number): StockoutSeverity {
+  if (hours >= 72) return "critical";
+  if (hours >= 24) return "high";
+  return "warning";
+}
+
+function stockoutAgeLabel(hours: number) {
+  if (hours < 1) return "Out for less than 1 hour";
+  if (hours < 24) return `Out for ${Math.floor(hours)} hour${Math.floor(hours) === 1 ? "" : "s"}`;
+  const days = Math.floor(hours / 24);
+  return `Out for ${days} day${days === 1 ? "" : "s"}`;
+}
+
+function buildStockoutInsights(
+  storeItems: Array<typeof itemsTable.$inferSelect>,
+  quantityHistory: Array<typeof historyTable.$inferSelect>,
+): StockoutInsight[] {
+  const historyByItem = new Map<number, Array<typeof historyTable.$inferSelect>>();
+  for (const row of quantityHistory) {
+    if (row.itemId === null) continue;
+    const rows = historyByItem.get(row.itemId) ?? [];
+    rows.push(row);
+    historyByItem.set(row.itemId, rows);
+  }
+
+  const now = Date.now();
+  return storeItems
+    .filter((item) => item.quantity <= 0)
+    .map((item): StockoutInsight => {
+      const transition = (historyByItem.get(item.id) ?? []).find((row) => {
+        const previous = parseHistoryQuantity(row.previousValue);
+        const next = parseHistoryQuantity(row.newValue);
+        return previous !== null && next !== null && previous > 0 && next <= 0;
+      });
+      const since = transition?.createdAt ?? item.lastUpdated;
+      const outOfStockHours = Math.max(0, Math.floor((now - since.getTime()) / 3_600_000));
+      const outOfStockDays = Math.floor(outOfStockHours / 24);
+      return {
+        itemId: item.id,
+        itemName: item.name,
+        location: item.location,
+        category: item.category,
+        quantity: item.quantity,
+        minQuantity: item.minQuantity,
+        maxQuantity: item.maxQuantity,
+        outOfStockSince: since.toISOString(),
+        outOfStockHours,
+        outOfStockDays,
+        ageLabel: stockoutAgeLabel(outOfStockHours),
+        severity: stockoutSeverity(outOfStockHours),
+        evidence: transition ? "history_transition" : "last_updated_fallback",
+      };
+    })
+    .sort((a, b) => {
+      const hoursDelta = b.outOfStockHours - a.outOfStockHours;
+      if (hoursDelta !== 0) return hoursDelta;
+      return a.itemName.localeCompare(b.itemName);
+    });
+}
+
+function buildLocationStockoutSummary(stockouts: StockoutInsight[]): LocationStockoutSummary[] {
+  const byLocation = new Map<string, LocationStockoutSummary>();
+
+  for (const stockout of stockouts) {
+    const current = byLocation.get(stockout.location) ?? {
+      location: stockout.location,
+      outOfStockCount: 0,
+      longestOutOfStockHours: 0,
+      longestOutOfStockLabel: "No current stockouts",
+      criticalStockoutCount: 0,
+    };
+    current.outOfStockCount += 1;
+    if (stockout.outOfStockHours > current.longestOutOfStockHours) {
+      current.longestOutOfStockHours = stockout.outOfStockHours;
+      current.longestOutOfStockLabel = stockout.ageLabel;
+    }
+    if (stockout.severity === "critical") current.criticalStockoutCount += 1;
+    byLocation.set(stockout.location, current);
+  }
+
+  return Array.from(byLocation.values()).sort((a, b) => {
+    const countDelta = b.outOfStockCount - a.outOfStockCount;
+    if (countDelta !== 0) return countDelta;
+    return b.longestOutOfStockHours - a.longestOutOfStockHours;
+  });
+}
+
 function shrinkageReason(row: typeof historyTable.$inferSelect) {
   const text = `${row.action ?? ""} ${row.field ?? ""} ${row.note ?? ""}`.toLowerCase();
   if (/theft|stolen|steal/.test(text)) return "Theft";
@@ -251,6 +372,19 @@ async function buildHousekeepingContext(req: Request): Promise<HousekeepingConte
         if (row.locationId !== null && row.locationId !== undefined && allowedLocationIds.has(row.locationId)) return true;
         return row.location ? legacyLocations.has(row.location) : false;
       });
+  const outOfStockItemIds = storeItems.filter((item) => item.quantity <= 0).map((item) => item.id);
+  const quantityHistory = outOfStockItemIds.length > 0
+    ? await db
+        .select()
+        .from(historyTable)
+        .where(and(
+          eq(historyTable.accountId, req.account!.id),
+          eq(historyTable.field, "quantity"),
+          inArray(historyTable.itemId, outOfStockItemIds),
+        ))
+        .orderBy(desc(historyTable.createdAt))
+        .limit(5000)
+    : [];
 
   const belowMinimum: AgentRecommendation[] = storeItems
     .filter((item) => storeStatus(item) === "below_minimum" || storeStatus(item) === "out")
@@ -296,6 +430,8 @@ async function buildHousekeepingContext(req: Request): Promise<HousekeepingConte
     }));
   const locationInsights = buildLocationInsights(storeItems);
   const lowestStockItems = buildLowestStockItems(storeItems);
+  const longestStockouts = buildStockoutInsights(storeItems, quantityHistory);
+  const locationStockouts = buildLocationStockoutSummary(longestStockouts);
   const shrinkage = buildShrinkageInsight(visibleHistory);
 
   return {
@@ -309,12 +445,37 @@ async function buildHousekeepingContext(req: Request): Promise<HousekeepingConte
       outOfStockCount: belowMinimum.filter((rec) => rec.quantity <= 0).length,
       locationCount: locationInsights.length,
       shrinkageEventCount: shrinkage.totalRecentEvents,
+      longStockoutCount: longestStockouts.filter((stockout) => stockout.outOfStockHours >= 48).length,
     },
     recommendations: [...belowMinimum, ...overstock, ...warehouseReorder].slice(0, 100),
     locationInsights,
     lowestStockItems,
+    longestStockouts,
+    locationStockouts,
     shrinkage,
   };
+}
+
+function normalizeInsightText(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function tokenOverlapScore(query: string, candidate: string) {
+  const queryTokens = new Set(normalizeInsightText(query).split(" ").filter((token) => token.length > 1));
+  const candidateTokens = normalizeInsightText(candidate).split(" ").filter((token) => token.length > 1);
+  if (queryTokens.size === 0 || candidateTokens.length === 0) return 0;
+  return candidateTokens.reduce((score, token) => score + (queryTokens.has(token) ? 1 : 0), 0);
+}
+
+function findMentionedStockout(message: string, stockouts: StockoutInsight[]) {
+  const ranked = stockouts
+    .map((stockout) => ({
+      stockout,
+      score: tokenOverlapScore(message, `${stockout.itemName} ${stockout.location} ${stockout.category}`),
+    }))
+    .filter((entry) => entry.score >= 2)
+    .sort((a, b) => b.score - a.score || b.stockout.outOfStockHours - a.stockout.outOfStockHours);
+  return ranked[0]?.stockout ?? null;
 }
 
 function deterministicAgentReply(message: string, context: HousekeepingContext) {
@@ -330,8 +491,31 @@ function deterministicAgentReply(message: string, context: HousekeepingContext) 
   const topLowestItems = context.lowestStockItems.slice(0, 5).map((item) =>
     `- ${item.itemName} at ${item.location}: ${item.quantity} on hand, range ${item.minQuantity}-${item.maxQuantity}, status ${item.status.replace("_", " ")}.`,
   ).join("\n");
+  const topStockouts = context.longestStockouts.slice(0, 5).map((stockout) =>
+    `- ${stockout.itemName} at ${stockout.location}: ${stockout.ageLabel}, out since ${stockout.outOfStockSince.slice(0, 10)}, range ${stockout.minQuantity}-${stockout.maxQuantity}, severity ${stockout.severity}.`,
+  ).join("\n");
+  const stockoutLocations = context.locationStockouts.slice(0, 5).map((location) =>
+    `- ${location.location}: ${location.outOfStockCount} out of stock, ${location.criticalStockoutCount} critical, longest ${location.longestOutOfStockLabel}.`,
+  ).join("\n");
   const shrinkageReasons = context.shrinkage.byReason.slice(0, 5).map((entry) => `- ${entry.reason}: ${entry.count}`).join("\n");
   const shrinkageLocations = context.shrinkage.byLocation.slice(0, 5).map((entry) => `- ${entry.location}: ${entry.count}`).join("\n");
+  const mentionedStockout = findMentionedStockout(message, context.longestStockouts);
+
+  if (mentionedStockout && /how long|since|duration|out of stock|stockout|stock out|zero/.test(text)) {
+    return `${mentionedStockout.itemName} at ${mentionedStockout.location} has been out of stock since ${mentionedStockout.outOfStockSince.slice(0, 10)} (${mentionedStockout.ageLabel}). Severity is ${mentionedStockout.severity}. The min/max range is ${mentionedStockout.minQuantity}-${mentionedStockout.maxQuantity}.`;
+  }
+
+  if (/out of stock|stockout|stock out|zero stock/.test(text) && /longest|long|how long|duration|since|oldest|48|72|critical/.test(text)) {
+    return context.longestStockouts.length
+      ? `Longest current stockouts from the read-only snapshot:\n${topStockouts}`
+      : "I do not see current out-of-stock items in the read-only snapshot.";
+  }
+
+  if (/store|location/.test(text) && /out of stock|stockout|stock out|zero stock/.test(text)) {
+    return context.locationStockouts.length
+      ? `Location stockout summary:\n${stockoutLocations}`
+      : "I do not see current location stockouts in the read-only snapshot.";
+  }
 
   if (/which|what|where|store|location/.test(text) && /lowest|least|low inventory|lowest inventory|weakest/.test(text)) {
     return context.locationInsights.length
@@ -417,6 +601,12 @@ ${JSON.stringify(context.locationInsights.slice(0, 20))}
 
 Lowest-stock items:
 ${JSON.stringify(context.lowestStockItems.slice(0, 20))}
+
+Current stockout duration insights:
+${JSON.stringify(context.longestStockouts.slice(0, 20))}
+
+Location stockout summary:
+${JSON.stringify(context.locationStockouts.slice(0, 20))}
 
 Shrinkage insight:
 ${JSON.stringify(context.shrinkage)}

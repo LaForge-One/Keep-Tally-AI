@@ -4,6 +4,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { LocationProvider } from "@/contexts/location-context";
 import { AuthProvider, useAuth } from "@/contexts/auth-context";
+import { DisplayPreferencesProvider } from "@/contexts/display-preferences-context";
 import NotFound from "@/pages/not-found";
 import Dashboard from "@/pages/dashboard";
 import Inventory from "@/pages/inventory";
@@ -106,14 +107,16 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <LocationProvider>
-          <TooltipProvider>
-            <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-              <Router />
-            </WouterRouter>
-            <Toaster />
-          </TooltipProvider>
-        </LocationProvider>
+        <DisplayPreferencesProvider>
+          <LocationProvider>
+            <TooltipProvider>
+              <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+                <Router />
+              </WouterRouter>
+              <Toaster />
+            </TooltipProvider>
+          </LocationProvider>
+        </DisplayPreferencesProvider>
       </AuthProvider>
     </QueryClientProvider>
   );

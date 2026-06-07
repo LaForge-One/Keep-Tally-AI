@@ -2,10 +2,17 @@ import { useQuery } from "@tanstack/react-query";
 import { Layout } from "@/components/layout";
 import { useSelectedLocation } from "@/contexts/location-context";
 import { useAuth } from "@/contexts/auth-context";
+import {
+  formatDisplayDate,
+  formatDisplayDateTime,
+  formatDisplayTime,
+  useDisplayPreferences,
+  type DateFormatPreference,
+  type TimeFormatPreference,
+} from "@/contexts/display-preferences-context";
 import { useLocation as useWouterLocation } from "wouter";
 import { PageSkeleton } from "@/components/ui/skeleton";
 import {
-  format,
   formatDistanceToNow,
   isToday,
   isYesterday,
@@ -48,11 +55,11 @@ type VoiceData = {
   lastCountAt: string | null;
 };
 
-function sessionLabel(dateStr: string) {
+function sessionLabel(dateStr: string, dateFormat: DateFormatPreference, timeFormat: TimeFormatPreference) {
   const d = new Date(dateStr);
-  if (isToday(d)) return `Today, ${format(d, "h:mm a")}`;
-  if (isYesterday(d)) return `Yesterday, ${format(d, "h:mm a")}`;
-  return format(d, "MMM d, h:mm a");
+  if (isToday(d)) return `Today, ${formatDisplayTime(d, timeFormat)}`;
+  if (isYesterday(d)) return `Yesterday, ${formatDisplayTime(d, timeFormat)}`;
+  return formatDisplayDateTime(d, dateFormat, timeFormat);
 }
 
 function lastCountLabel(dateStr: string | null) {
@@ -72,6 +79,7 @@ export default function Dashboard() {
   const { hasPermission } = useAuth();
   const [, navigate] = useWouterLocation();
   const { selectedLocation } = useSelectedLocation();
+  const { dateFormat, timeFormat } = useDisplayPreferences();
 
   const { data, isLoading } = useQuery<VoiceData>({
     queryKey: ["voice-dashboard", selectedLocation],
@@ -172,7 +180,7 @@ export default function Dashboard() {
               Voice Inventory
             </h1>
             <p style={{ fontSize: 14, color: "#64748b", marginTop: 4 }}>
-              {format(new Date(), "EEEE, MMMM d")}
+              {formatDisplayDate(new Date(), dateFormat)}
               {selectedLocation && ` · ${selectedLocation}`}
             </p>
           </div>
@@ -752,7 +760,7 @@ export default function Dashboard() {
                               marginTop: 2,
                             }}
                           >
-                            {sessionLabel(session.date)} · {session.itemCount}{" "}
+                            {sessionLabel(session.date, dateFormat, timeFormat)} · {session.itemCount}{" "}
                             actions
                           </p>
                         </div>

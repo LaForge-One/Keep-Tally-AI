@@ -85,6 +85,13 @@
       "when": 1780448400000,
       "tag": "0011_product_identifiers",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1780886400000,
+      "tag": "0012_archive_lifecycle",
+      "breakpoints": true
     }
   ]
 }

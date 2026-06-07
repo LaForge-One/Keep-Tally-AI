@@ -12,6 +12,7 @@
     "test:warehouse-voice-add-item": "tsx --test ./src/warehouse-voice-add-item-regression.test.ts",
     "test:mobile-scanner-risks": "tsx --test ./src/mobile-native-scanner-risk.test.ts",
     "deploy:preflight": "tsx ./src/deploy-preflight.ts",
+    "archive:retention": "tsx ./src/archive-retention.ts",
     "reset-admin-password": "tsx ./src/reset-admin-password.ts",
     "import-csv": "tsx ./src/import-csv.ts",
     "report:tenant-links": "tsx ./src/report-tenant-links.ts",

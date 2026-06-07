@@ -15,6 +15,7 @@
     "test:warehouse-voice-add-item": "corepack pnpm --filter @workspace/scripts run test:warehouse-voice-add-item",
     "test:mobile-scanner-risks": "corepack pnpm --filter @workspace/scripts run test:mobile-scanner-risks",
     "deploy:preflight": "corepack pnpm --filter @workspace/scripts run deploy:preflight",
+    "archive:retention": "corepack pnpm --filter @workspace/scripts run archive:retention",
     "dev:reset-admin": "corepack pnpm --filter @workspace/scripts run reset-admin-password",
     "build": "corepack pnpm run typecheck && corepack pnpm -r --if-present run build",
     "build:api": "corepack pnpm --filter @workspace/api-server run build",
