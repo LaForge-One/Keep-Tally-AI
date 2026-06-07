@@ -2,7 +2,7 @@ import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { useLocation } from "wouter";
 import { Layout } from "@/components/layout";
 import { useAuth } from "@/contexts/auth-context";
-import { useVoice, getVoiceSupport } from "@/hooks/use-voice";
+import { useAIVoice, getAIVoiceSupport, type ListenResult } from "@/hooks/use-ai-voice";
 import {
   buildWarehouseItemCreatePayloadFromVoiceDraft,
   isCompleteWarehouseVoiceAddItemDraft,
@@ -44,6 +44,9 @@ import { useQuery } from "@tanstack/react-query";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const LIST_PAGE_SIZE = 50;
+const WAREHOUSE_VOICE_TTS_ENABLED = import.meta.env.VITE_VOICE_COUNT_TTS_ENABLED === "true";
+const WAREHOUSE_VOICE_CONFIRMATION_AUDIO_ENABLED =
+  import.meta.env.VITE_VOICE_COUNT_CONFIRMATION_AUDIO_ENABLED !== "false";
 
 function listPageCount(total: number) {
   return Math.max(1, Math.ceil(total / LIST_PAGE_SIZE));
@@ -248,8 +251,16 @@ const MODE_ICONS: Record<CountMode, React.ReactNode> = {
 export default function WarehouseVoice() {
   const [, navigate] = useLocation();
   const { hasPermission } = useAuth();
-  const { speak, cancelSpeech, listen, stopListening, cancelAll } = useVoice();
-  const voiceSupport = getVoiceSupport();
+  const {
+    speak,
+    speakBrowser,
+    cancelSpeech,
+    listenDetailed,
+    stopListening,
+    cancelAll,
+    resetVoiceSession,
+  } = useAIVoice();
+  const voiceSupport = getAIVoiceSupport();
 
   const [phase, setPhase] = useState<Phase>("setup");
   const [countMode, setCountMode] = useState<CountMode | null>(null);
@@ -313,22 +324,28 @@ export default function WarehouseVoice() {
     if (controlRef.current.shouldStop || controlRef.current.shouldPause) return false;
     setStatusMessage(text);
     vibrate(30);
-    await speak(text);
+    if (WAREHOUSE_VOICE_TTS_ENABLED) {
+      await speak(text);
+    } else if (WAREHOUSE_VOICE_CONFIRMATION_AUDIO_ENABLED) {
+      await speakBrowser(text);
+    }
     return !controlRef.current.shouldStop && !controlRef.current.shouldPause;
-  }, [speak]);
+  }, [speak, speakBrowser]);
 
   const safeListen = useCallback(async (timeoutMs: number): Promise<string | null> => {
     if (controlRef.current.shouldStop || controlRef.current.shouldPause) return null;
     vibrate([50, 30, 50]);
-    const transcript = await listen(timeoutMs);
+    const result: ListenResult = await listenDetailed(timeoutMs);
+    const transcript = result.ok ? result.transcript : "";
     if (controlRef.current.shouldStop || controlRef.current.shouldPause) return null;
     setLastHeard(transcript || "");
     return transcript;
-  }, [listen]);
+  }, [listenDetailed]);
 
   /* ── QUEUE-BASED session ── */
   const runSession = useCallback(async (queue: WarehouseItem[], startIndex: number) => {
     if (isRunningRef.current) return;
+    resetVoiceSession();
     isRunningRef.current = true;
     controlRef.current = { shouldStop: false, shouldSkip: false, shouldRepeat: false, shouldPause: false };
     await acquireWakeLock();
@@ -394,14 +411,15 @@ export default function WarehouseVoice() {
     } else if (controlRef.current.shouldPause) {
       setPhase("paused");
     } else {
-      await speak("Warehouse tally complete.");
+      await safeSpeak("Warehouse tally complete.");
       setPhase("complete");
     }
-  }, [safeSpeak, safeListen, addResult, speak, acquireWakeLock, releaseWakeLock]);
+  }, [safeSpeak, safeListen, addResult, acquireWakeLock, releaseWakeLock, resetVoiceSession]);
 
   /* ── AI VOICE session ── */
   const runAiSession = useCallback(async (sessionItems: WarehouseItem[]) => {
     if (isRunningRef.current) return;
+    resetVoiceSession();
     isRunningRef.current = true;
     controlRef.current = { shouldStop: false, shouldSkip: false, shouldRepeat: false, shouldPause: false };
     await acquireWakeLock();
@@ -450,10 +468,10 @@ export default function WarehouseVoice() {
     if (controlRef.current.shouldPause) {
       setPhase("paused");
     } else {
-      await speak("Tally complete.");
+      await safeSpeak("Tally complete.");
       setPhase("complete");
     }
-  }, [safeSpeak, safeListen, addResult, speak, acquireWakeLock, releaseWakeLock]);
+  }, [safeSpeak, safeListen, addResult, acquireWakeLock, releaseWakeLock, resetVoiceSession]);
 
   const createWarehouseItemFromVoiceDraft = useCallback(async (draft: WarehouseVoiceAddItemDraft): Promise<WarehouseItem> => {
     const res = await fetch(`${BASE}/api/warehouse`, {
@@ -467,6 +485,7 @@ export default function WarehouseVoice() {
 
   const handleWarehouseVoiceAddItem = useCallback(async () => {
     if (isRunningRef.current || warehouseAddItemBusy) return;
+    resetVoiceSession();
 
     if (!hasPermission("edit_warehouse")) {
       setStatusMessage("You do not have permission to add warehouse items.");
@@ -552,6 +571,7 @@ export default function WarehouseVoice() {
     createWarehouseItemFromVoiceDraft,
     refetchWarehouse,
     releaseWakeLock,
+    resetVoiceSession,
   ]);
 
   /* ── Build queue & start ── */
@@ -1004,7 +1024,7 @@ export default function WarehouseVoice() {
         </div>
 
         {/* Browser support warning */}
-        {!voiceSupport.stt && (
+        {!voiceSupport.hasSpeechRecognition && (
           <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800 dark:bg-amber-950/30 dark:border-amber-800 dark:text-amber-300">
             <MicOff className="w-4 h-4 mt-0.5 shrink-0" />
             <span>
