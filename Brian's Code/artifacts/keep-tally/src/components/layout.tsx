@@ -1,5 +1,5 @@
-import { ReactNode, useState } from "react";
-import { Link, useLocation } from "wouter";
+import { ReactNode, useEffect, useMemo, useState } from "react";
+import { Link, useLocation, useLocation as useWouterLocation } from "wouter";
 import {
   LayoutDashboard,
   Package,
@@ -34,7 +34,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useSelectedLocation, LOCATIONS } from "@/contexts/location-context";
 import { useAuth, useCurrentUser } from "@/contexts/auth-context";
-import { useLocation as useWouterLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -81,59 +80,52 @@ function SidebarNav({
     return location.startsWith(path);
   }
 
+  function navItemClass(active: boolean) {
+    return `flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-interactive ${
+      active
+        ? "bg-primary/10 text-primary font-semibold"
+        : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+    }`;
+  }
+
+  function navIconClass(active: boolean) {
+    return `h-[17px] w-[17px] shrink-0 ${
+      active ? "text-primary" : "text-slate-400"
+    }`;
+  }
+
   return (
-    <div className="flex h-full flex-col bg-[#f8fafc] border-r border-slate-200">
+    <div className="flex h-full flex-col border-r border-slate-200 bg-[#f8fafc]">
       {/* Logo */}
-      <div className="flex h-14 shrink-0 items-center px-5 border-b border-slate-200">
+      <div className="flex h-14 shrink-0 items-center border-b border-slate-200 px-5">
         <div className="flex items-center gap-2.5">
           <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-white shadow-sm border border-slate-200">
             <Package className="h-4 w-4 text-sky-500" />
           </div>
-          <span className="text-lg font-bold tracking-tight text-slate-900">KeepTally</span>
+          <span className="text-lg font-bold tracking-tight text-slate-900">
+            KeepTally
+          </span>
         </div>
       </div>
 
       {/* Nav items */}
-      <nav className="flex-1 overflow-y-auto py-3 px-2.5 space-y-0.5">
+      <nav className="flex-1 space-y-0.5 overflow-y-auto px-2.5 py-3">
         {mainNav.map((item) => {
           const active = isActive(item.path);
-          const isVoice = item.path === "/voice-check";
-          if (isVoice) {
-            return (
-              <Link
-                key={item.path}
-                href={item.path}
-                onClick={onClose}
-                className="flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-bold transition-colors mb-1"
-                style={
-                  active
-                    ? { background: "linear-gradient(135deg, #4f46e5, #6366f1)", color: "white" }
-                    : { background: "linear-gradient(135deg, rgba(79,70,229,0.12), rgba(99,102,241,0.12))", color: "#4f46e5" }
-                }
-              >
-                <item.icon className="h-[17px] w-[17px] shrink-0" />
-                <span className="truncate">{item.label}</span>
-                {!active && <span className="ml-auto text-[9px] font-bold tracking-wide px-1.5 py-0.5 rounded-full" style={{ background: "rgba(79,70,229,0.2)", color: "#6366f1" }}>PRIMARY</span>}
-              </Link>
-            );
-          }
           return (
             <Link
               key={item.path}
               href={item.path}
               onClick={onClose}
-              className={`flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
-                active
-                  ? "bg-white text-sky-700 shadow-sm border border-slate-200 border-l-[3px] border-l-sky-500"
-                  : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-              }`}
+              className={navItemClass(active)}
             >
-              <item.icon
-                className={`h-[17px] w-[17px] shrink-0 ${
-                  active ? "text-sky-600" : "text-slate-400"
-                }`}
-              />
+              <item.icon className={navIconClass(active)} />
               <span className="truncate">{item.label}</span>
+              {item.path === "/voice-check" && !active && (
+                <span className="ml-auto rounded bg-primary/10 px-1.5 py-0.5 text-[9px] font-bold tracking-wide text-primary">
+                  PRIMARY
+                </span>
+              )}
             </Link>
           );
         })}
@@ -150,17 +142,9 @@ function SidebarNav({
                   key={item.path}
                   href={item.path}
                   onClick={onClose}
-                  className={`flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
-                    active
-                      ? "bg-white text-sky-700 shadow-sm border border-slate-200 border-l-[3px] border-l-sky-500"
-                      : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-                  }`}
+                  className={navItemClass(active)}
                 >
-                  <item.icon
-                    className={`h-[17px] w-[17px] shrink-0 ${
-                      active ? "text-sky-600" : "text-slate-400"
-                    }`}
-                  />
+                  <item.icon className={navIconClass(active)} />
                   <span className="truncate">{item.label}</span>
                 </Link>
               );
@@ -201,14 +185,41 @@ export function Layout({ children }: { children: ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [searchValue, setSearchValue] = useState("");
 
-  const { selectedLocation, setSelectedLocation } = useSelectedLocation();  const { logout, hasPermission } = useAuth();
+  const { selectedLocation, setSelectedLocation } = useSelectedLocation();
+  const { logout, hasPermission } = useAuth();
   const currentUser = useCurrentUser();
+  const isStoreInventoryPage = location === "/inventory";
+  const isWarehousePage = location.startsWith("/warehouse");
+  const canUseStoreLocationSelector =
+    isStoreInventoryPage &&
+    (hasPermission("view_all_locations") ||
+      (currentUser?.assignedLocations?.length ?? 0) > 1);
+  const storeLocationOptions = useMemo(
+    () =>
+      LOCATIONS.filter(
+        (loc) =>
+          hasPermission("view_all_locations") ||
+          currentUser?.assignedLocations?.length === 0 ||
+          currentUser?.assignedLocations?.includes(loc),
+      ),
+    [currentUser?.assignedLocations, hasPermission],
+  );
+
+  useEffect(() => {
+    if (!isStoreInventoryPage && selectedLocation !== null) {
+      setSelectedLocation(null);
+    }
+  }, [isStoreInventoryPage, selectedLocation, setSelectedLocation]);
 
   const { data: summary } = useQuery({
-    queryKey: ["dashboard-summary-header", selectedLocation],
+    queryKey: [
+      "dashboard-summary-header",
+      isStoreInventoryPage ? selectedLocation : null,
+    ],
     queryFn: async () => {
-      const params = selectedLocation
-        ? `?location=${encodeURIComponent(selectedLocation)}`
+      const scopedLocation = isStoreInventoryPage ? selectedLocation : null;
+      const params = scopedLocation
+        ? `?location=${encodeURIComponent(scopedLocation)}`
         : "";
       const res = await fetch(`${BASE}/api/dashboard/summary${params}`, {
         credentials: "include",
@@ -321,16 +332,15 @@ export function Layout({ children }: { children: ReactNode }) {
             <Menu className="h-5 w-5" />
           </button>
 
-          {/* Location selector */}
-          {(hasPermission("view_all_locations") ||
-            (currentUser?.assignedLocations?.length ?? 0) > 1) && (
+          {/* Store location selector: available only on Store Inventory. */}
+          {canUseStoreLocationSelector && (
             <Select
               value={selectedLocation ?? "__all__"}
               onValueChange={(val) =>
                 setSelectedLocation(
                   val === "__all__"
                     ? null
-                    : (val as (typeof LOCATIONS)[number])
+                    : (val as (typeof LOCATIONS)[number]),
                 )
               }
             >
@@ -342,18 +352,20 @@ export function Layout({ children }: { children: ReactNode }) {
                 {hasPermission("view_all_locations") && (
                   <SelectItem value="__all__">All Locations</SelectItem>
                 )}
-                {LOCATIONS.filter(
-                  (loc) =>
-                    hasPermission("view_all_locations") ||
-                    (currentUser?.assignedLocations?.length === 0) ||
-                    currentUser?.assignedLocations?.includes(loc)
-                ).map((loc) => (
+                {storeLocationOptions.map((loc) => (
                   <SelectItem key={loc} value={loc}>
                     {loc}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
+          )}
+
+          {isWarehousePage && (
+            <div className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700">
+              <Warehouse className="h-3.5 w-3.5 text-slate-400" />
+              Warehouse Inventory
+            </div>
           )}
 
           <div className="flex-1" />
@@ -433,9 +445,7 @@ export function Layout({ children }: { children: ReactNode }) {
                 </div>
                 <DropdownMenuSeparator />
                 {currentUser.role === "admin" && (
-                  <DropdownMenuItem
-                    onClick={() => navigate("/admin/users")}
-                  >
+                  <DropdownMenuItem onClick={() => navigate("/admin/users")}>
                     <Users className="w-4 h-4 mr-2" /> Manage Users
                   </DropdownMenuItem>
                 )}
@@ -458,4 +468,3 @@ export function Layout({ children }: { children: ReactNode }) {
     </div>
   );
 }
-

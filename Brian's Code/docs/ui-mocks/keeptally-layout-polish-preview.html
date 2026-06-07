@@ -1,0 +1,477 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>KeepTally Layout Polish Preview</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4f7fb;
+      --panel: #ffffff;
+      --ink: #0f172a;
+      --muted: #64748b;
+      --line: #d8e1ee;
+      --blue: #2f6fac;
+      --blue-2: #5a93c7;
+      --blue-soft: #e8f2fb;
+      --green: #16a34a;
+      --amber: #d97706;
+      --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06), 0 2px 6px rgba(15, 23, 42, 0.06);
+      --shadow-md: 0 4px 8px -4px rgba(15, 23, 42, 0.14), 0 12px 28px -18px rgba(15, 23, 42, 0.32);
+      --shadow-lg: 0 10px 18px -8px rgba(15, 23, 42, 0.18), 0 24px 44px -28px rgba(15, 23, 42, 0.38);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: "DM Sans", system-ui, sans-serif;
+      letter-spacing: 0;
+    }
+
+    .shell {
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: 236px 1fr;
+    }
+
+    .rail {
+      background: #f8fafc;
+      border-right: 1px solid var(--line);
+      padding: 16px 12px;
+    }
+
+    .brand {
+      height: 46px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0 10px 14px;
+      border-bottom: 1px solid var(--line);
+      margin-bottom: 14px;
+      font-weight: 700;
+      color: #143653;
+    }
+
+    .brand-mark {
+      width: 31px;
+      height: 31px;
+      border-radius: 10px;
+      display: grid;
+      place-items: center;
+      background: white;
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow-sm);
+      color: var(--blue);
+    }
+
+    .nav { display: grid; gap: 5px; }
+
+    .nav-item {
+      display: grid;
+      grid-template-columns: 24px 1fr auto;
+      align-items: center;
+      gap: 9px;
+      min-height: 38px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      color: #516276;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .nav-item.active {
+      background: var(--blue-soft);
+      color: var(--blue);
+      border-left: 3px solid var(--blue);
+    }
+
+    .nav-item svg { width: 18px; height: 18px; color: currentColor; }
+
+    .pill {
+      font-size: 9px;
+      font-weight: 800;
+      letter-spacing: .05em;
+      color: var(--blue);
+      background: #dbeafe;
+      padding: 3px 5px;
+      border-radius: 5px;
+    }
+
+    main {
+      padding: 24px;
+    }
+
+    .topbar {
+      height: 58px;
+      background: rgba(255,255,255,.86);
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+      backdrop-filter: blur(12px);
+      position: sticky;
+      top: 0;
+      z-index: 2;
+    }
+
+    .selector {
+      height: 34px;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: white;
+      color: #334155;
+      padding: 0 12px;
+      font-size: 13px;
+      font-weight: 700;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .selector-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .context-badge {
+      height: 34px;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: white;
+      color: #334155;
+      padding: 0 12px;
+      font-size: 13px;
+      font-weight: 800;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .context-note {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) minmax(320px, .8fr);
+      gap: 18px;
+      max-width: 1180px;
+      margin: 0 auto;
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid rgba(148, 163, 184, .34);
+      border-radius: 12px;
+      box-shadow: var(--shadow-md);
+      overflow: hidden;
+    }
+
+    .card-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 16px 18px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    h1, h2, p { margin: 0; }
+    h1 { font-size: 24px; line-height: 1.1; }
+    h2 { font-size: 15px; }
+    .sub { color: var(--muted); font-size: 13px; margin-top: 5px; }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      padding: 16px 18px;
+    }
+
+    .metric {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 13px;
+      background: linear-gradient(180deg, #fff, #f8fbff);
+    }
+
+    .metric strong {
+      display: block;
+      font-size: 26px;
+      line-height: 1;
+      color: #17324d;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .metric span {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 6px;
+      font-weight: 700;
+    }
+
+    .rows { padding: 0 18px 18px; display: grid; gap: 8px; }
+    .row {
+      min-height: 48px;
+      display: grid;
+      grid-template-columns: 1fr 86px 92px;
+      gap: 12px;
+      align-items: center;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      padding: 10px 12px;
+      background: #fff;
+    }
+
+    .row b { font-size: 14px; }
+    .row small { display: block; color: var(--muted); margin-top: 2px; }
+    .qty { text-align: right; font-weight: 800; color: #0f2c4a; font-variant-numeric: tabular-nums; }
+    .status { justify-self: end; border-radius: 999px; padding: 4px 8px; font-size: 11px; font-weight: 800; }
+    .good { background: #dcfce7; color: #166534; }
+    .warn { background: #fef3c7; color: #92400e; }
+
+    .scanner-card { padding: 18px; display: grid; gap: 16px; }
+    .scanner {
+      position: relative;
+      height: 196px;
+      border-radius: 14px;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 28% 28%, rgba(90,147,199,.24), transparent 32%),
+        linear-gradient(145deg, #0e2238, #132f4d 48%, #0b1828);
+      box-shadow: var(--shadow-lg);
+    }
+
+    .scanner::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: rgba(0,0,0,.22);
+    }
+
+    .frame {
+      position: absolute;
+      inset: 48px 42px;
+      border-radius: 8px;
+    }
+
+    .white-corner,
+    .blue-corner {
+      position: absolute;
+      width: 30px;
+      height: 30px;
+      border-style: solid;
+    }
+
+    .white-corner { border-color: rgba(255,255,255,.92); border-width: 4px; }
+    .blue-corner { border-color: #64b5f6; border-width: 2px; width: 18px; height: 18px; opacity: .9; }
+    .tl { top: 0; left: 0; border-right: 0; border-bottom: 0; border-radius: 4px 0 0 0; }
+    .tr { top: 0; right: 0; border-left: 0; border-bottom: 0; border-radius: 0 4px 0 0; }
+    .bl { bottom: 0; left: 0; border-right: 0; border-top: 0; border-radius: 0 0 0 4px; }
+    .br { bottom: 0; right: 0; border-left: 0; border-top: 0; border-radius: 0 0 4px 0; }
+    .blue-corner.tl { top: 6px; left: 6px; }
+    .blue-corner.tr { top: 6px; right: 6px; }
+    .blue-corner.bl { bottom: 6px; left: 6px; }
+    .blue-corner.br { bottom: 6px; right: 6px; }
+
+    @keyframes scan-line {
+      0% { top: 8%; opacity: .3; }
+      35% { top: 44%; opacity: 1; }
+      65% { top: 44%; opacity: 1; }
+      100% { top: 8%; opacity: .3; }
+    }
+
+    .scan-line {
+      position: absolute;
+      left: 10%;
+      right: 10%;
+      height: 2px;
+      border-radius: 2px;
+      background: linear-gradient(90deg, transparent, #64b5f6 20%, #64b5f6 80%, transparent);
+      box-shadow: 0 0 14px rgba(100,181,246,.75);
+      animation: scan-line 2.4s ease-in-out infinite;
+    }
+
+    .skeletons { padding: 18px; display: grid; gap: 12px; }
+
+    @keyframes kt-shimmer {
+      0% { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+
+    .skeleton {
+      background: linear-gradient(90deg, #e8eef6 25%, #f5f8fc 50%, #e8eef6 75%);
+      background-size: 200% 100%;
+      animation: kt-shimmer 1.5s ease infinite;
+      border-radius: 8px;
+    }
+
+    .h6 { height: 24px; width: 190px; }
+    .h4 { height: 16px; width: 260px; }
+    .h20 { height: 82px; }
+    .h12 { height: 48px; }
+
+    .button {
+      height: 42px;
+      border: 0;
+      border-radius: 10px;
+      background: var(--blue);
+      color: white;
+      font-weight: 800;
+      padding: 0 14px;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .layout-rules {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      padding: 0 18px 18px;
+    }
+
+    .rule {
+      min-height: 86px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #f8fbff;
+      padding: 12px;
+    }
+
+    .rule strong {
+      display: block;
+      color: #17324d;
+      font-size: 13px;
+      margin-bottom: 5px;
+    }
+
+    .rule span {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    @media (max-width: 900px) {
+      .shell { grid-template-columns: 1fr; }
+      .rail { display: none; }
+      .grid { grid-template-columns: 1fr; }
+      .layout-rules { grid-template-columns: 1fr; }
+      main { padding: 16px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside class="rail">
+      <div class="brand"><div class="brand-mark">KT</div> KeepTally</div>
+      <nav class="nav">
+        <div class="nav-item active">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h18"/><path d="M6 7v13"/><path d="M18 7v13"/><path d="M9 12h6"/></svg>
+          <span>Voice Count</span><span class="pill">PRIMARY</span>
+        </div>
+        <div class="nav-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/></svg>
+          <span>Store Inventory</span>
+        </div>
+        <div class="nav-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18"/><path d="M5 21V7l7-4 7 4v14"/><path d="M9 21v-8h6v8"/></svg>
+          <span>Warehouse</span>
+        </div>
+        <div class="nav-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V4h3"/><path d="M17 4h3v3"/><path d="M20 17v3h-3"/><path d="M7 20H4v-3"/><path d="M7 12h10"/></svg>
+          <span>Scanner</span>
+        </div>
+      </nav>
+    </aside>
+    <section>
+      <div class="topbar">
+        <div class="selector-row">
+          <div class="selector">Store Inventory · All Locations ▾</div>
+          <div class="context-note">Dropdown appears only on Store Inventory</div>
+        </div>
+        <button class="button">Start Voice Count</button>
+      </div>
+      <main>
+        <div class="grid">
+          <section class="card">
+            <div class="card-head">
+              <div>
+                <h1>Layout Polish Preview</h1>
+                <p class="sub">DM Sans, cooler blue controls, shimmer loading, scanner visual pass.</p>
+              </div>
+              <div class="status good">Ready</div>
+            </div>
+            <div class="metrics">
+              <div class="metric"><strong>600</strong><span>Seed Items</span></div>
+              <div class="metric"><strong>14</strong><span>Voice Tests</span></div>
+              <div class="metric"><strong>3</strong><span>Low Stock</span></div>
+            </div>
+            <div class="layout-rules">
+              <div class="rule">
+                <strong>Store Inventory</strong>
+                <span>Shows the location dropdown. Admins can choose All Locations; assigned users see their stores.</span>
+              </div>
+              <div class="rule">
+                <strong>Warehouse Inventory</strong>
+                <span>Shows a locked Warehouse Inventory badge. No store-location dropdown appears here.</span>
+              </div>
+              <div class="rule">
+                <strong>Other Screens</strong>
+                <span>Route, AI, reports, setup, and scan screens clear store context to avoid accidental filtering.</span>
+              </div>
+            </div>
+            <div class="rows">
+              <div class="row"><div><b>Coke Zero 20oz</b><small>Drinks · UPC 049000042566</small></div><div class="qty">5</div><div class="status good">Verified</div></div>
+              <div class="row"><div><b>Red Bull 8.4oz</b><small>Energy · Voice alias redbull</small></div><div class="qty">12</div><div class="status warn">Below Min</div></div>
+              <div class="row"><div><b>Skittles Original</b><small>Candy · Scanner ready</small></div><div class="qty">24</div><div class="status good">In Range</div></div>
+            </div>
+          </section>
+
+          <aside class="card">
+            <div class="card-head">
+              <div>
+                <h2>Scanner Overlay</h2>
+                <p class="sub">Corner guides plus eased scan sweep.</p>
+              </div>
+            </div>
+            <div class="scanner-card">
+              <div class="scanner">
+                <div class="frame">
+                  <span class="white-corner tl"></span><span class="white-corner tr"></span>
+                  <span class="white-corner bl"></span><span class="white-corner br"></span>
+                  <span class="blue-corner tl"></span><span class="blue-corner tr"></span>
+                  <span class="blue-corner bl"></span><span class="blue-corner br"></span>
+                  <span class="scan-line"></span>
+                </div>
+              </div>
+              <div class="skeletons">
+                <div class="context-badge">Warehouse Inventory</div>
+                <p class="sub">Warehouse pages use this badge instead of the store dropdown.</p>
+                <div class="skeleton h6"></div>
+                <div class="skeleton h4"></div>
+                <div class="skeleton h20"></div>
+                <div class="skeleton h12"></div>
+              </div>
+            </div>
+          </aside>
+        </div>
+      </main>
+    </section>
+  </div>
+</body>
+</html>
