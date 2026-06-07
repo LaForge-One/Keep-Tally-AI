@@ -1,6 +1,7 @@
 import { ReactNode, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useLocation as useWouterLocation } from "wouter";
 import {
+  ArrowLeft,
   ArrowLeftRight,
   BarChart2,
   Bell,
@@ -281,6 +282,7 @@ export function Layout({ children }: { children: ReactNode }) {
   const { logout, hasPermission } = useAuth();
   const currentUser = useCurrentUser();
 
+  const canGoBack = location !== "/";
   const isStoreInventoryPage = location === "/inventory";
   const isWarehousePage = location.startsWith("/warehouse");
   const canUseStoreLocationSelector =
@@ -395,6 +397,15 @@ export function Layout({ children }: { children: ReactNode }) {
     setSidebarOpen(false);
   }
 
+  function handleBack() {
+    setSidebarOpen(false);
+    if (window.history.length > 1) {
+      window.history.back();
+      return;
+    }
+    navigate("/");
+  }
+
   const sidebarProps: SidebarProps = {
     nav,
     location,
@@ -448,6 +459,24 @@ export function Layout({ children }: { children: ReactNode }) {
           >
             <Menu className="h-5 w-5" />
           </button>
+
+          {canGoBack && (
+            <button
+              type="button"
+              onClick={handleBack}
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-sm font-semibold transition-colors hover:bg-slate-100"
+              style={{
+                border: "1px solid #d8e2ee",
+                background: "#fff",
+                color: "#334155",
+              }}
+              aria-label="Go back"
+              title="Back"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Back</span>
+            </button>
+          )}
 
           {canUseStoreLocationSelector && (
             <Select

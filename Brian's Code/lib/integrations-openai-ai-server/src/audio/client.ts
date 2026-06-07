@@ -28,7 +28,12 @@ const TTS_MODEL = process.env.AI_TTS_MODEL ?? "gpt-4o-mini-tts";
 const TRANSCRIBE_MODEL = process.env.AI_TRANSCRIBE_MODEL ?? "gpt-4o-mini-transcribe";
 const DEFAULT_TTS_INSTRUCTIONS =
   process.env.AI_TTS_INSTRUCTIONS ??
-  "Use a warm, polite, natural human voice. Keep prompts brief, calm, and easy to understand for an inventory operator.";
+  [
+    "Use a smooth, soft, feminine-presenting voice with a warm and reassuring tone.",
+    "Sound natural and human, not robotic or announcer-like.",
+    "Use gentle pacing, light upward inflection, and clear inventory-friendly diction.",
+    "Keep responses brief, calm, and easy to understand for a busy inventory operator.",
+  ].join(" ");
 
 export type AudioFormat = "wav" | "mp3" | "webm" | "mp4" | "ogg" | "unknown";
 

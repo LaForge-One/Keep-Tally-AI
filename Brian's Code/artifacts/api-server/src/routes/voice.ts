@@ -50,7 +50,7 @@ const TTS_VOICES = [
 type TtsVoice = (typeof TTS_VOICES)[number];
 const DEFAULT_TTS_VOICE: TtsVoice = TTS_VOICES.includes(process.env.AI_TTS_VOICE as TtsVoice)
   ? (process.env.AI_TTS_VOICE as TtsVoice)
-  : "shimmer";
+  : "nova";
 
 class VoiceTimeoutError extends Error {
   constructor(message: string) {

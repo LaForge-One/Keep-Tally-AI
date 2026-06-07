@@ -164,8 +164,44 @@ async function fetchWithTimeout(
 async function speakWithBrowserTts(text: string): Promise<void> {
   if (!("speechSynthesis" in window)) return;
 
+  const preferredVoiceNames = [
+    "Samantha",
+    "Victoria",
+    "Ava",
+    "Allison",
+    "Susan",
+    "Zira",
+    "Google US English",
+    "Google UK English Female",
+    "Microsoft Zira",
+  ];
+
+  const getVoices = async () => {
+    const existing = window.speechSynthesis.getVoices();
+    if (existing.length > 0) return existing;
+    return await new Promise<SpeechSynthesisVoice[]>((resolve) => {
+      const timer = window.setTimeout(() => resolve(window.speechSynthesis.getVoices()), 250);
+      window.speechSynthesis.onvoiceschanged = () => {
+        window.clearTimeout(timer);
+        resolve(window.speechSynthesis.getVoices());
+      };
+    });
+  };
+
+  const voices = await getVoices();
+  const preferredVoice =
+    preferredVoiceNames
+      .map((name) => voices.find((voice) => voice.name.toLowerCase().includes(name.toLowerCase())))
+      .find(Boolean) ??
+    voices.find((voice) => voice.lang.toLowerCase().startsWith("en") && /female|woman/i.test(voice.name)) ??
+    voices.find((voice) => voice.lang.toLowerCase().startsWith("en"));
+
   await new Promise<void>((resolve) => {
     const utterance = new SpeechSynthesisUtterance(text);
+    if (preferredVoice) utterance.voice = preferredVoice;
+    utterance.rate = 0.92;
+    utterance.pitch = 1.08;
+    utterance.volume = 0.95;
     const timer = window.setTimeout(() => {
       window.speechSynthesis.cancel();
       resolve();

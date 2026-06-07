@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type { ElementType } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Layout } from "@/components/layout";
@@ -14,10 +14,13 @@ import {
   Boxes,
   CheckCircle2,
   Loader2,
+  MessageSquareText,
   RefreshCw,
   Send,
   ShieldCheck,
+  Sparkles,
   TrendingDown,
+  Trash2,
 } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -59,6 +62,8 @@ type ChatMessage = {
   role: "user" | "assistant";
   content: string;
   source?: "ai" | "deterministic" | "deterministic-fallback";
+  generatedAt?: string;
+  recommendationCount?: number;
 };
 
 type ConversationResponse = {
@@ -89,6 +94,23 @@ const GROUPS: Record<RecommendationType, { title: string; label: string; icon: E
   },
 };
 
+const SUGGESTED_PROMPTS = [
+  "What needs restocking first?",
+  "Any overstock problems?",
+  "What warehouse items need reordering?",
+  "Give me today's quick housekeeping summary.",
+  "What should I handle before a route leaves?",
+  "Summarize risk by store location.",
+];
+
+const WELCOME_MESSAGE: ChatMessage = {
+  id: "welcome",
+  role: "assistant",
+  content:
+    "Ask me about restock priorities, overstock, warehouse reorders, recent changes, or what needs attention first.",
+  source: "deterministic",
+};
+
 function severityClass(severity: RecommendationSeverity) {
   if (severity === "critical") return "bg-red-100 text-red-700 border-red-200";
   if (severity === "warning") return "bg-amber-100 text-amber-700 border-amber-200";
@@ -103,6 +125,10 @@ function recommendationQty(rec: AgentRecommendation) {
   if (rec.type === "store_restock") return rec.recommendedTransferQty ?? 0;
   if (rec.type === "warehouse_reorder") return rec.recommendedPurchaseQty ?? 0;
   return Math.max(0, rec.quantity - (rec.maxQuantity ?? rec.quantity));
+}
+
+function hasUsableConversation(data: HousekeepingResponse | undefined, error: unknown) {
+  return Boolean(data && !error);
 }
 
 function RecommendationRow({ rec }: { rec: AgentRecommendation }) {
@@ -149,17 +175,11 @@ function RecommendationRow({ rec }: { rec: AgentRecommendation }) {
 
 export default function AgentInsightsPage() {
   const [chatInput, setChatInput] = useState("");
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
-    {
-      id: "welcome",
-      role: "assistant",
-      content: "Ask me about restock priorities, overstock, warehouse reorders, recent changes, or what needs attention first.",
-      source: "deterministic",
-    },
-  ]);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([WELCOME_MESSAGE]);
   const [chatLoading, setChatLoading] = useState(false);
   const [chatError, setChatError] = useState("");
   const [page, setPage] = useState(1);
+  const chatEndRef = useRef<HTMLDivElement | null>(null);
 
   const { data, isLoading, isFetching, refetch, error } = useQuery<HousekeepingResponse>({
     queryKey: ["agent-housekeeping"],
@@ -184,6 +204,10 @@ export default function AgentInsightsPage() {
     setPage((current) => Math.min(current, totalPages));
   }, [totalPages]);
 
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [chatMessages, chatLoading]);
+
   const grouped = useMemo(() => {
     const map = new Map<RecommendationType, AgentRecommendation[]>();
     for (const rec of pageRecommendations) {
@@ -195,9 +219,9 @@ export default function AgentInsightsPage() {
 
   const agentConnected = Boolean(data && !error);
 
-  const sendMessage = async (event?: FormEvent) => {
+  const sendMessage = async (event?: FormEvent, overrideMessage?: string) => {
     event?.preventDefault();
-    const message = chatInput.trim();
+    const message = (overrideMessage ?? chatInput).trim();
     if (!message || chatLoading) return;
 
     const userMessage: ChatMessage = {
@@ -235,6 +259,8 @@ export default function AgentInsightsPage() {
           role: "assistant",
           content: payload.answer ?? "I could not generate an answer from the current agent context.",
           source: payload.source ?? "deterministic-fallback",
+          generatedAt: payload.generatedAt,
+          recommendationCount: payload.context?.recommendationCount,
         },
       ]);
     } catch (err) {
@@ -252,6 +278,12 @@ export default function AgentInsightsPage() {
     } finally {
       setChatLoading(false);
     }
+  };
+
+  const clearConversation = () => {
+    setChatMessages([WELCOME_MESSAGE]);
+    setChatError("");
+    setChatInput("");
   };
 
   return (
@@ -318,19 +350,44 @@ export default function AgentInsightsPage() {
           </div>
         </div>
 
-        <section className="grid gap-4 rounded-lg border border-border bg-card p-4 shadow-sm lg:grid-cols-[minmax(0,1fr)_18rem]">
+        <section className="grid gap-4 rounded-lg border border-border bg-card p-4 shadow-sm lg:grid-cols-[minmax(0,1fr)_20rem]">
           <div className="min-w-0 space-y-3">
-            <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10">
-                <Bot className="h-4 w-4 text-primary" />
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10">
+                  <MessageSquareText className="h-4 w-4 text-primary" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold text-foreground">Live Insights Conversation</h2>
+                  <p className="text-xs text-muted-foreground">
+                    Ask operational questions against the latest read-only inventory snapshot.
+                  </p>
+                </div>
               </div>
-              <div>
-                <h2 className="text-sm font-bold text-foreground">Insights Conversation</h2>
-                <p className="text-xs text-muted-foreground">Read-only answers based on the current inventory and recommendation snapshot.</p>
+              <div className="flex items-center gap-2">
+                <Badge
+                  variant="outline"
+                  className={
+                    hasUsableConversation(data, error)
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                      : "border-amber-200 bg-amber-50 text-amber-700"
+                  }
+                >
+                  {hasUsableConversation(data, error) ? "Live" : "Snapshot pending"}
+                </Badge>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={clearConversation}
+                  disabled={chatLoading || chatMessages.length <= 1}
+                  title="Clear conversation"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
               </div>
             </div>
 
-            <div className="max-h-80 space-y-3 overflow-auto rounded-md border border-border bg-muted/20 p-3">
+            <div className="h-[22rem] space-y-3 overflow-auto rounded-md border border-border bg-muted/20 p-3">
               {chatMessages.map((message) => (
                 <div
                   key={message.id}
@@ -345,9 +402,15 @@ export default function AgentInsightsPage() {
                   >
                     <p className="whitespace-pre-line">{message.content}</p>
                     {message.role === "assistant" && message.source && (
-                      <p className="mt-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                        {message.source === "ai" ? "AI assisted" : "Rule-based fallback"}
-                      </p>
+                      <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        <span>{message.source === "ai" ? "AI assisted" : "Rule-based fallback"}</span>
+                        {typeof message.recommendationCount === "number" && (
+                          <span>{message.recommendationCount} recs in context</span>
+                        )}
+                        {message.generatedAt && (
+                          <span>{new Date(message.generatedAt).toLocaleTimeString()}</span>
+                        )}
+                      </div>
                     )}
                   </div>
                 </div>
@@ -360,6 +423,7 @@ export default function AgentInsightsPage() {
                   </div>
                 </div>
               )}
+              <div ref={chatEndRef} />
             </div>
 
             {chatError && (
@@ -375,7 +439,7 @@ export default function AgentInsightsPage() {
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && !event.shiftKey) {
                     event.preventDefault();
-                    void sendMessage();
+                    void sendMessage(undefined);
                   }
                 }}
                 placeholder="Ask: What should we restock first?"
@@ -389,24 +453,36 @@ export default function AgentInsightsPage() {
           </div>
 
           <div className="rounded-md border border-border bg-muted/20 p-3 text-xs text-muted-foreground">
-            <p className="font-bold uppercase tracking-wide text-foreground">Good questions</p>
+            <div className="flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-primary" />
+              <p className="font-bold uppercase tracking-wide text-foreground">Ask Live</p>
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-2 text-center">
+              <div className="rounded-md border border-border bg-background p-2">
+                <p className="text-base font-black text-foreground">{data?.summary.belowMinimumCount ?? 0}</p>
+                <p>below min</p>
+              </div>
+              <div className="rounded-md border border-border bg-background p-2">
+                <p className="text-base font-black text-foreground">{data?.summary.warehouseReorderCount ?? 0}</p>
+                <p>reorders</p>
+              </div>
+            </div>
             <div className="mt-3 space-y-2">
-              {[
-                "What needs restocking first?",
-                "Any overstock problems?",
-                "What warehouse items need reordering?",
-                "Give me today's quick housekeeping summary.",
-              ].map((prompt) => (
+              {SUGGESTED_PROMPTS.map((prompt) => (
                 <button
                   key={prompt}
                   type="button"
-                  onClick={() => setChatInput(prompt)}
-                  className="block w-full rounded-md border border-border bg-background px-3 py-2 text-left font-medium text-foreground hover:bg-muted"
+                  onClick={() => void sendMessage(undefined, prompt)}
+                  disabled={chatLoading}
+                  className="block w-full rounded-md border border-border bg-background px-3 py-2 text-left font-medium text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {prompt}
                 </button>
               ))}
             </div>
+            <p className="mt-3 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-[11px] leading-relaxed text-sky-800">
+              Conversation is read-only. It can summarize, prioritize, and explain recommendations, but it cannot write database changes.
+            </p>
           </div>
         </section>
 
