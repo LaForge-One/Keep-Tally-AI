@@ -223,6 +223,14 @@ install_active_vhost_lock() {
         return opens - closes
       }
 
+      function print_auth_block(indent) {
+        print indent begin " " domain
+        print indent "auth_basic \"KeepTally restricted access\";"
+        print indent "auth_basic_user_file " auth_file ";"
+        print indent "proxy_set_header Authorization \"\";"
+        print indent end " " domain
+      }
+
       /^[[:space:]]*server[[:space:]]*\{/ {
         in_server = 1
         server_depth = 0
@@ -236,15 +244,24 @@ install_active_vhost_lock() {
 
       {
         print
-        if (in_server && matched_server && inserted == 0 && $0 ~ /^[[:space:]]*location[[:space:]]+\/[[:space:]]*\{/) {
+        if (in_server && matched_server && $0 ~ /^[[:space:]]*location[[:space:]]+\/[[:space:]]*\{/) {
           match($0, /^[[:space:]]*/)
           indent = substr($0, RSTART, RLENGTH) "    "
-          print indent begin " " domain
-          print indent "auth_basic \"KeepTally restricted access\";"
-          print indent "auth_basic_user_file " auth_file ";"
-          print indent "proxy_set_header Authorization \"\";"
-          print indent end " " domain
+          in_proxy_location = 1
+          location_depth = brace_delta($0)
+        } else if (in_proxy_location) {
+          location_depth += brace_delta($0)
+        }
+
+        if (in_proxy_location && inserted == 0 && $0 ~ /^[[:space:]]*include[[:space:]]+\/usr\/local\/apps\/nginx\/etc\/conf\.d\/proxy\.conf;/) {
+          print_auth_block(indent)
           inserted = 1
+        }
+
+        if (in_proxy_location && location_depth <= 0) {
+          if (inserted == 0) print_auth_block(indent)
+          in_proxy_location = 0
+          location_depth = 0
         }
       }
 
