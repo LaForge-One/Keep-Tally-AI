@@ -15,6 +15,7 @@ import { useLocation as useWouterLocation } from "wouter";
 import {
   Bell,
   CalendarClock,
+  ChevronRight,
   ClipboardList,
   Database,
   Download,
@@ -161,6 +162,7 @@ export default function SettingsPage() {
   const availableExports = EXPORT_ACTIONS.filter((action) => hasPermission(action.permission));
   const canImportSales = hasPermission("edit_store_inventory");
   const canImportWarehouse = hasPermission("edit_warehouse");
+  const canManageUsers = hasPermission("manage_users");
 
   return (
     <Layout>
@@ -420,8 +422,44 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
 
+        <Card className="shadow-sm">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary/10">
+                <ShieldCheck className="h-4 w-4 text-primary" />
+              </div>
+              Admin Governance
+            </CardTitle>
+            <CardDescription>
+              Security controls and role permissions live in the admin Users & Permissions module.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-center">
+            <div className="grid gap-3 sm:grid-cols-3">
+              {[
+                ["Users", "Create, deactivate, and reset team access."],
+                ["Permissions", "Tune warehouse, store, voice, scanner, and report access by role."],
+                ["Security", "Use password reset, must-change-password, role scope, and the global inactivity timeout."],
+              ].map(([title, description]) => (
+                <div key={title} className="rounded-lg border border-border bg-muted/20 p-3">
+                  <p className="text-sm font-bold text-foreground">{title}</p>
+                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{description}</p>
+                </div>
+              ))}
+            </div>
+            <Button
+              className="w-full sm:w-auto"
+              disabled={!canManageUsers}
+              onClick={() => navigate("/users")}
+            >
+              Open Admin Module
+              <ChevronRight className="ml-2 h-4 w-4" />
+            </Button>
+          </CardContent>
+        </Card>
+
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          {SETTING_SECTIONS.map(({ icon: Icon, title, description, status }) => (
+          {SETTING_SECTIONS.filter(({ title }) => title !== "Security" && title !== "Users & Permissions").map(({ icon: Icon, title, description, status }) => (
             <Card key={title} className={`shadow-sm ${status === "Coming soon" ? "opacity-60" : ""}`}>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-semibold flex items-center gap-2">

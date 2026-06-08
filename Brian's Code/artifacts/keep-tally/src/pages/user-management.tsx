@@ -34,7 +34,8 @@ import {
   UserCheck,
   ShieldCheck,
   Users,
-  ChevronRight,
+  Clock,
+  MapPin,
 } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -209,11 +210,55 @@ export default function UserManagementPage() {
             <h1 className="text-2xl font-bold flex items-center gap-2">
               <Users className="w-6 h-6" /> User Management
             </h1>
-            <p className="text-sm text-muted-foreground mt-0.5">Manage team members and their access</p>
+            <p className="text-sm text-muted-foreground mt-0.5">Manage team members, role permissions, security resets, and location access</p>
           </div>
           <Button onClick={() => setAddOpen(true)} className="gap-2">
             <UserPlus className="w-4 h-4" /> Add User
           </Button>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Card className="shadow-sm">
+            <CardContent className="flex items-start gap-3 py-4">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary/10">
+                <ShieldCheck className="h-4 w-4 text-primary" />
+              </div>
+              <div>
+                <p className="text-sm font-bold">Security Controls</p>
+                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                  Reset passwords, force password changes, and deactivate users from one place.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="shadow-sm">
+            <CardContent className="flex items-start gap-3 py-4">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary/10">
+                <MapPin className="h-4 w-4 text-primary" />
+              </div>
+              <div>
+                <p className="text-sm font-bold">Location Scope</p>
+                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                  Assign users to specific stores or leave empty for all-location access.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="shadow-sm">
+            <CardContent className="flex items-start gap-3 py-4">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary/10">
+                <Clock className="h-4 w-4 text-primary" />
+              </div>
+              <div>
+                <p className="text-sm font-bold">Session Protection</p>
+                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                  The global inactivity timer logs users out after 15 minutes without activity.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
         </div>
 
         <Tabs defaultValue="users">
