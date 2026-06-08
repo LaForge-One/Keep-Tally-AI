@@ -173,7 +173,7 @@ write_auth_file() {
   umask 077
   printf '%s:%s\n' "$USERNAME" "$hash" > "$AUTH_FILE"
   chown root:root "$AUTH_FILE" 2>/dev/null || true
-  chmod 640 "$AUTH_FILE"
+  chmod 644 "$AUTH_FILE"
 }
 
 install_domain_lock() {

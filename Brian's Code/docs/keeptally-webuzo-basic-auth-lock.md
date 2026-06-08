@@ -42,6 +42,9 @@ The script prompts for a password twice. The plaintext password is not saved. On
 /etc/nginx/keeptally-basic-auth.htpasswd
 ```
 
+The auth file is written as `root:root` with mode `644` so Webuzo/nginx worker
+processes can read the hash while only root can modify it.
+
 ## Status
 
 ```bash
