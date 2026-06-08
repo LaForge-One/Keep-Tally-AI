@@ -360,21 +360,11 @@ export function Layout({ children }: { children: ReactNode }) {
       section: "Intelligence",
     },
     { path: "/history", label: "Reports", icon: BarChart2 },
-    ...(currentUser?.role === "admin"
-      ? [
-          {
-            path: "/admin/users",
-            label: "Users & Permissions",
-            icon: Users,
-            section: "Admin",
-          },
-        ]
-      : []),
     {
       path: "/settings",
       label: "Settings",
       icon: Settings,
-      section: currentUser?.role !== "admin" ? "Admin" : undefined,
+      section: "Admin",
     },
   ];
 
@@ -719,8 +709,8 @@ export function Layout({ children }: { children: ReactNode }) {
                 </div>
                 <DropdownMenuSeparator />
                 {currentUser.role === "admin" && (
-                  <DropdownMenuItem onClick={() => navigate("/admin/users")}>
-                    <Users className="mr-2 h-4 w-4" /> Manage Users
+                  <DropdownMenuItem onClick={() => navigate("/settings")}>
+                    <Users className="mr-2 h-4 w-4" /> Admin Settings
                   </DropdownMenuItem>
                 )}
                 <DropdownMenuItem

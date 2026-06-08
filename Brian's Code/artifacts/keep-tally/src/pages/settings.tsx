@@ -747,7 +747,7 @@ export default function SettingsPage() {
             <Button
               className="w-full sm:w-auto"
               disabled={!canManageUsers}
-              onClick={() => navigate("/users")}
+              onClick={() => navigate("/admin/users")}
             >
               Open Admin Module
               <ChevronRight className="ml-2 h-4 w-4" />
