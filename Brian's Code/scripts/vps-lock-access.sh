@@ -141,8 +141,8 @@ strip_active_vhost_blocks() {
   local tmp
   tmp="$(mktemp)"
   awk -v begin="$LOCATION_MARKER_BEGIN" -v end="$LOCATION_MARKER_END" '
-    index($0, begin) == 1 { skip = 1; next }
-    index($0, end) == 1 { skip = 0; next }
+    index($0, begin) > 0 { skip = 1; next }
+    index($0, end) > 0 { skip = 0; next }
     skip != 1 { print }
   ' "$file" > "$tmp"
   cat "$tmp" > "$file"
