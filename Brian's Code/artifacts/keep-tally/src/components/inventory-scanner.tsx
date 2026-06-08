@@ -96,8 +96,14 @@ export function InventoryScanner({
   const { selectedLocation } = useSelectedLocation();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const selectedStoreLocation =
+    inventoryType === "store" ? selectedLocation : null;
   const createLocationOptions =
-    inventoryType === "warehouse" ? ["Warehouse"] : [...LOCATIONS];
+    inventoryType === "warehouse"
+      ? ["Warehouse"]
+      : selectedStoreLocation
+        ? [selectedStoreLocation]
+        : [];
   const defaultCreateLocation =
     inventoryType === "warehouse"
       ? "Warehouse"
@@ -241,6 +247,7 @@ export function InventoryScanner({
           const params = new URLSearchParams({ inventoryType: "warehouse" });
           const res = await fetch(
             `${BASE}/api/items/barcode/${encodeURIComponent(code)}?${params}`,
+            { credentials: "include" },
           );
           if (res.status === 404) {
             setResult({
@@ -263,7 +270,9 @@ export function InventoryScanner({
         } else {
           const params = new URLSearchParams({ barcode: code });
           if (selectedLocation) params.set("location", selectedLocation);
-          const res = await fetch(`${BASE}/api/scan/lookup?${params}`);
+          const res = await fetch(`${BASE}/api/scan/lookup?${params}`, {
+            credentials: "include",
+          });
           const data: ScanResult = await res.json();
           setResult(data);
           if (data.storeItem) setAdjustQty(String(data.storeItem.quantity));
@@ -284,6 +293,7 @@ export function InventoryScanner({
       const res = await fetch(`${BASE}/api/scan/action`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify(body),
       });
       if (!res.ok) throw new Error("Action failed");
@@ -317,8 +327,19 @@ export function InventoryScanner({
     setTimeout(() => startCamera(), 100);
   }
 
+  function requireStoreLocationForWrite() {
+    if (inventoryType !== "store" || selectedStoreLocation) return true;
+    toast({
+      title: "Select a store first",
+      description: "Scanner inventory changes need an explicit store location.",
+      variant: "destructive",
+    });
+    return false;
+  }
+
   async function handleVerify() {
     if (!result?.storeItem || countedQty === "") return;
+    if (!requireStoreLocationForWrite()) return;
     const item = result.storeItem;
     const counted = parseInt(countedQty);
     const diff = counted - item.quantity;
@@ -347,10 +368,12 @@ export function InventoryScanner({
 
   async function handleAdjust() {
     if (!result?.storeItem || adjustQty === "") return;
+    if (inventoryType === "store" && !requireStoreLocationForWrite()) return;
     try {
       const res = await fetch(`${BASE}/api/inventory/adjustments`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({
           inventoryType,
           barcode,
@@ -373,17 +396,18 @@ export function InventoryScanner({
   async function handleAddToStore() {
     const src = result?.otherItems[0];
     if (!src) return;
+    if (!requireStoreLocationForWrite()) return;
     try {
       await postAction({
         action: "add-to-store",
         barcode,
         sourceItemId: src.id,
-        location: selectedLocation ?? createLocation,
+        location: selectedStoreLocation!,
         quantity: parseInt(addQty) || 0,
         parLevel: parseInt(addPar) || src.parLevel,
         category: addCategory || src.category,
       });
-      toast({ title: `"${src.name}" added to ${selectedLocation}!` });
+      toast({ title: `"${src.name}" added to ${selectedStoreLocation}!` });
       invalidateInventory();
       resetToCamera();
     } catch {
@@ -393,16 +417,37 @@ export function InventoryScanner({
 
   async function handleCreate() {
     if (!createName.trim()) return;
+    if (inventoryType === "store" && !requireStoreLocationForWrite()) return;
     try {
-      await postAction({
-        action: "create",
-        barcode,
-        name: createName.trim(),
-        category: createCategory || "Uncategorized",
-        location: createLocation,
-        quantity: parseInt(createQty) || 0,
-        parLevel: parseInt(createPar) || 0,
-      });
+      if (inventoryType === "warehouse") {
+        const quantity = parseInt(createQty) || 0;
+        const minPar = parseInt(createPar) || 0;
+        const res = await fetch(`${BASE}/api/warehouse`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({
+            barcode,
+            name: createName.trim(),
+            category: createCategory || "Uncategorized",
+            quantity,
+            minPar,
+            maxPar: Math.max(quantity, minPar, minPar * 2),
+            reorderPoint: minPar,
+          }),
+        });
+        if (!res.ok) throw new Error("Warehouse create failed");
+      } else {
+        await postAction({
+          action: "create",
+          barcode,
+          name: createName.trim(),
+          category: createCategory || "Uncategorized",
+          location: selectedStoreLocation!,
+          quantity: parseInt(createQty) || 0,
+          parLevel: parseInt(createPar) || 0,
+        });
+      }
       toast({ title: `"${createName}" created!` });
       invalidateInventory();
       resetToCamera();

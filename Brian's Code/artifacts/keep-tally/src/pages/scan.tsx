@@ -28,8 +28,6 @@ import {
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const LIST_PAGE_SIZE = 50;
 
-const ALL_LOCATIONS = [...LOCATIONS, "Warehouse"] as const;
-
 type ScanResult = {
   found: boolean;
   storeItem: ItemData | null;
@@ -121,6 +119,7 @@ function useBarcodeScanner(onScan: (barcode: string) => void) {
 export default function ScanPage() {
   const { selectedLocation } = useSelectedLocation();
   const { toast } = useToast();
+  const createLocationOptions = selectedLocation ? [selectedLocation] : [];
 
   const [view, setView] = useState<View>("idle");
   const [barcode, setBarcode] = useState("");
@@ -148,7 +147,7 @@ export default function ScanPage() {
   const [createCategory, setCreateCategory] = useState("");
   const [createQty, setCreateQty] = useState("0");
   const [createPar, setCreatePar] = useState("0");
-  const [createLocation, setCreateLocation] = useState(selectedLocation ?? "Warehouse");
+  const [createLocation, setCreateLocation] = useState(selectedLocation ?? LOCATIONS[0]);
 
   const handleBarcodeScan = useCallback(async (code: string) => {
     setBarcode(code);
@@ -157,7 +156,9 @@ export default function ScanPage() {
     try {
       const params = new URLSearchParams({ barcode: code });
       if (selectedLocation) params.set("location", selectedLocation);
-      const res = await fetch(`${BASE}/api/scan/lookup?${params}`);
+      const res = await fetch(`${BASE}/api/scan/lookup?${params}`, {
+        credentials: "include",
+      });
       const data: ScanResult = await res.json();
       setResult(data);
       if (data.storeItem) {
@@ -194,6 +195,7 @@ export default function ScanPage() {
       const res = await fetch(`${BASE}/api/scan/action`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify(body),
       });
       if (!res.ok) throw new Error("Action failed");
@@ -205,6 +207,14 @@ export default function ScanPage() {
 
   async function handleVerify() {
     if (!result?.storeItem || countedQty === "") return;
+    if (!selectedLocation) {
+      toast({
+        title: "Select a store first",
+        description: "Scanner inventory changes need an explicit store location.",
+        variant: "destructive",
+      });
+      return;
+    }
     const counted = parseInt(countedQty);
     const diff = counted - result.storeItem.quantity;
     const applyCount = diff !== 0;
@@ -229,6 +239,14 @@ export default function ScanPage() {
 
   async function handleAdjust() {
     if (!result?.storeItem || adjustQty === "") return;
+    if (!selectedLocation) {
+      toast({
+        title: "Select a store first",
+        description: "Scanner inventory changes need an explicit store location.",
+        variant: "destructive",
+      });
+      return;
+    }
     try {
       await postAction({
         action: "adjust",
@@ -247,13 +265,21 @@ export default function ScanPage() {
 
   async function handleAddToStore() {
     if (!result?.otherItems[0]) return;
+    if (!selectedLocation) {
+      toast({
+        title: "Select a store first",
+        description: "Scanner inventory changes need an explicit store location.",
+        variant: "destructive",
+      });
+      return;
+    }
     const source = result.otherItems[0];
     try {
       await postAction({
         action: "add-to-store",
         barcode,
         sourceItemId: source.id,
-        location: selectedLocation ?? createLocation,
+        location: selectedLocation,
         quantity: parseInt(addQty) || 0,
         parLevel: parseInt(addPar) || source.parLevel,
         category: addCategory || source.category,
@@ -267,13 +293,21 @@ export default function ScanPage() {
 
   async function handleCreate() {
     if (!createName.trim()) return;
+    if (!selectedLocation) {
+      toast({
+        title: "Select a store first",
+        description: "Scanner inventory changes need an explicit store location.",
+        variant: "destructive",
+      });
+      return;
+    }
     try {
       await postAction({
         action: "create",
         barcode,
         name: createName.trim(),
         category: createCategory || "Uncategorized",
-        location: createLocation,
+        location: selectedLocation,
         quantity: parseInt(createQty) || 0,
         parLevel: parseInt(createPar) || 0,
       });
@@ -507,7 +541,7 @@ export default function ScanPage() {
                         </div>
                         <div className="px-4 pb-4">
                           <Button className="w-full h-12 rounded-xl font-bold" onClick={() => {
-                            setCreateLocation(selectedLocation ?? "Warehouse");
+                            setCreateLocation(selectedLocation ?? LOCATIONS[0]);
                             setView("create");
                           }}>
                             <PackagePlus className="w-5 h-5 mr-2" />
@@ -788,7 +822,7 @@ export default function ScanPage() {
               <div>
                 <label className="text-sm font-semibold block mb-2">Location</label>
                 <div className="grid grid-cols-2 gap-2">
-                  {ALL_LOCATIONS.map((loc) => (
+                  {createLocationOptions.map((loc) => (
                     <button
                       key={loc}
                       onClick={() => setCreateLocation(loc)}
