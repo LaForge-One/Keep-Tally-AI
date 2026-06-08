@@ -236,12 +236,7 @@ install_active_vhost_lock() {
 
       {
         print
-        if (
-          in_server &&
-          matched_server &&
-          inserted == 0 &&
-          $0 ~ /^[[:space:]]*location[[:space:]]+\/[[:space:]]*\{/
-        ) {
+        if (in_server && matched_server && inserted == 0 && $0 ~ /^[[:space:]]*location[[:space:]]+\/[[:space:]]*\{/) {
           match($0, /^[[:space:]]*/)
           indent = substr($0, RSTART, RLENGTH) "    "
           print indent begin " " domain
