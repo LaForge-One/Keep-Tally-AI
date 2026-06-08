@@ -242,6 +242,7 @@ install_active_vhost_lock() {
           print indent begin " " domain
           print indent "auth_basic \"KeepTally restricted access\";"
           print indent "auth_basic_user_file " auth_file ";"
+          print indent "proxy_set_header Authorization \"\";"
           print indent end " " domain
           inserted = 1
         }

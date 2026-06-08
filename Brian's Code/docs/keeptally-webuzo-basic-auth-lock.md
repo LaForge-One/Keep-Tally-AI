@@ -21,6 +21,10 @@ It also injects the same Basic Auth block into the active Webuzo generated proxy
 `location /` for each domain. This is necessary because Webuzo places the custom
 domain include outside the proxy location that serves the KeepTally app.
 
+The active proxy-location block also clears the upstream `Authorization` header.
+That prevents the browser's Basic Auth header from being forwarded into the
+KeepTally app, where it can conflict with the app's cookie/JWT authentication.
+
 ## Install
 
 Run on the VPS as root:
