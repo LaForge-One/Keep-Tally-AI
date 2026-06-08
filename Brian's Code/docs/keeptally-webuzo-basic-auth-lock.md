@@ -17,6 +17,10 @@ The script adds nginx Basic Auth to the Webuzo custom domain snippets for:
 - `dev.keeptally.ai`
 - `test.keeptally.ai`
 
+It also injects the same Basic Auth block into the active Webuzo generated proxy
+`location /` for each domain. This is necessary because Webuzo places the custom
+domain include outside the proxy location that serves the KeepTally app.
+
 ## Install
 
 Run on the VPS as root:
@@ -91,6 +95,10 @@ The authenticated request should reach the app or the next outer gate, such as C
 
 - The script writes a managed block into each Webuzo custom domain file:
   `/var/webuzo-data/nginx/custom/domains/<domain>.conf`
+- The script writes a managed location-level block into:
+  `/usr/local/apps/nginx/etc/conf.d/webuzoVH.conf`
 - It backs up every modified snippet with a timestamped `.bak.<timestamp>` suffix.
+- Webuzo may regenerate `webuzoVH.conf`; rerun the install command if the password
+  gate disappears after a Webuzo domain/proxy change.
 - It runs `nginx -t` before restarting nginx.
 - Do not commit or paste the password into repo files, shell history, or docs.

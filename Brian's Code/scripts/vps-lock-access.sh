@@ -27,6 +27,7 @@ Environment overrides:
   KEEPTALLY_LOCK_DOMAINS
   KEEPTALLY_LOCK_AUTH_FILE
   WEBUZO_NGINX_CUSTOM_DOMAIN_DIR
+  WEBUZO_NGINX_VHOST_FILE
   WEBUZO_NGINX_BIN
 
 Examples:
@@ -43,9 +44,12 @@ USERNAME="${KEEPTALLY_LOCK_USERNAME:-keeptally}"
 DOMAINS_CSV="${KEEPTALLY_LOCK_DOMAINS:-dev.keeptally.ai,test.keeptally.ai}"
 AUTH_FILE="${KEEPTALLY_LOCK_AUTH_FILE:-/etc/nginx/keeptally-basic-auth.htpasswd}"
 CUSTOM_DOMAIN_DIR="${WEBUZO_NGINX_CUSTOM_DOMAIN_DIR:-/var/webuzo-data/nginx/custom/domains}"
+VHOST_FILE="${WEBUZO_NGINX_VHOST_FILE:-/usr/local/apps/nginx/etc/conf.d/webuzoVH.conf}"
 NGINX_BIN="${WEBUZO_NGINX_BIN:-nginx}"
 MARKER_BEGIN="# BEGIN KEEPTALLY BASIC AUTH"
 MARKER_END="# END KEEPTALLY BASIC AUTH"
+LOCATION_MARKER_BEGIN="# BEGIN KEEPTALLY BASIC AUTH LOCATION"
+LOCATION_MARKER_END="# END KEEPTALLY BASIC AUTH LOCATION"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -132,6 +136,19 @@ strip_managed_block() {
   rm -f "$tmp"
 }
 
+strip_active_vhost_blocks() {
+  local file="$1"
+  local tmp
+  tmp="$(mktemp)"
+  awk -v begin="$LOCATION_MARKER_BEGIN" -v end="$LOCATION_MARKER_END" '
+    index($0, begin) == 1 { skip = 1; next }
+    index($0, end) == 1 { skip = 0; next }
+    skip != 1 { print }
+  ' "$file" > "$tmp"
+  cat "$tmp" > "$file"
+  rm -f "$tmp"
+}
+
 write_auth_file() {
   local password confirm hash openssl_path auth_dir
   auth_dir="$(dirname "$AUTH_FILE")"
@@ -185,6 +202,70 @@ EOF
   echo "Locked: $domain"
 }
 
+install_active_vhost_lock() {
+  local domain="$1"
+  local tmp
+
+  if [[ ! -f "$VHOST_FILE" ]]; then
+    echo "Active Webuzo vhost file not found; skipped location-level lock: $VHOST_FILE"
+    return
+  fi
+
+  tmp="$(mktemp)"
+  awk \
+    -v domain="$domain" \
+    -v auth_file="$AUTH_FILE" \
+    -v begin="$LOCATION_MARKER_BEGIN" \
+    -v end="$LOCATION_MARKER_END" '
+      function brace_delta(line, opens, closes) {
+        opens = gsub(/\{/, "{", line)
+        closes = gsub(/\}/, "}", line)
+        return opens - closes
+      }
+
+      /^[[:space:]]*server[[:space:]]*\{/ {
+        in_server = 1
+        server_depth = 0
+        matched_server = 0
+        inserted = 0
+      }
+
+      in_server && $0 ~ /server_name/ && index($0, domain) > 0 {
+        matched_server = 1
+      }
+
+      {
+        print
+        if (
+          in_server &&
+          matched_server &&
+          inserted == 0 &&
+          $0 ~ /^[[:space:]]*location[[:space:]]+\/[[:space:]]*\{/
+        ) {
+          match($0, /^[[:space:]]*/)
+          indent = substr($0, RSTART, RLENGTH) "    "
+          print indent begin " " domain
+          print indent "auth_basic \"KeepTally restricted access\";"
+          print indent "auth_basic_user_file " auth_file ";"
+          print indent end " " domain
+          inserted = 1
+        }
+      }
+
+      in_server {
+        server_depth += brace_delta($0)
+        if (server_depth <= 0) {
+          in_server = 0
+          matched_server = 0
+          inserted = 0
+        }
+      }
+    ' "$VHOST_FILE" > "$tmp"
+  cat "$tmp" > "$VHOST_FILE"
+  rm -f "$tmp"
+  echo "Locked active proxy location: $domain"
+}
+
 disable_domain_lock() {
   local domain="$1"
   local file
@@ -196,6 +277,16 @@ disable_domain_lock() {
   backup_file "$file"
   strip_managed_block "$file"
   echo "Unlocked: $domain"
+}
+
+disable_active_vhost_locks() {
+  if [[ ! -f "$VHOST_FILE" ]]; then
+    echo "Active Webuzo vhost file not found; skipped location-level unlock: $VHOST_FILE"
+    return
+  fi
+  backup_file "$VHOST_FILE"
+  strip_active_vhost_blocks "$VHOST_FILE"
+  echo "Removed active proxy location lock blocks"
 }
 
 status_domain_lock() {
@@ -213,6 +304,19 @@ status_domain_lock() {
   fi
 }
 
+status_active_vhost_lock() {
+  local domain="$1"
+  if [[ ! -f "$VHOST_FILE" ]]; then
+    echo "$domain: active vhost file missing ($VHOST_FILE)"
+    return
+  fi
+  if grep -Fq "$LOCATION_MARKER_BEGIN $domain" "$VHOST_FILE"; then
+    echo "$domain: active proxy location locked"
+  else
+    echo "$domain: active proxy location not locked"
+  fi
+}
+
 restart_nginx() {
   "$NGINX_BIN" -t
   if command -v systemctl >/dev/null 2>&1; then
@@ -227,10 +331,15 @@ require_root
 case "$ACTION" in
   install)
     write_auth_file
+    if [[ -f "$VHOST_FILE" ]]; then
+      backup_file "$VHOST_FILE"
+      strip_active_vhost_blocks "$VHOST_FILE"
+    fi
     for domain in "${DOMAINS[@]}"; do
       domain="${domain//[[:space:]]/}"
       [[ -z "$domain" ]] && continue
       install_domain_lock "$domain"
+      install_active_vhost_lock "$domain"
     done
     restart_nginx
     echo
@@ -245,6 +354,7 @@ case "$ACTION" in
       [[ -z "$domain" ]] && continue
       disable_domain_lock "$domain"
     done
+    disable_active_vhost_locks
     restart_nginx
     ;;
   status)
@@ -252,6 +362,7 @@ case "$ACTION" in
       domain="${domain//[[:space:]]/}"
       [[ -z "$domain" ]] && continue
       status_domain_lock "$domain"
+      status_active_vhost_lock "$domain"
     done
     if [[ -f "$AUTH_FILE" ]]; then
       echo "auth file: present ($AUTH_FILE)"
