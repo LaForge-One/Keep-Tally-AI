@@ -53,7 +53,7 @@ const TIME_FORMAT_LABELS: Record<TimeFormatPreference, string> = {
 const THEME_LABELS: Record<ProfileTheme, string> = {
   system: "System",
   light: "Light",
-  dark: "Dark",
+  dark: "Graphite",
 };
 
 type ExportAction = {
@@ -397,7 +397,7 @@ export default function SettingsPage() {
                     </div>
                     <p className="mt-2 text-sm font-bold">{THEME_LABELS[theme]}</p>
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      {theme === "system" ? "Match device" : theme === "light" ? "Bright workspace" : "Low-light workspace"}
+                      {theme === "system" ? "Match device" : theme === "light" ? "Bright workspace" : "Soft dark gray"}
                     </p>
                   </button>
                 );
