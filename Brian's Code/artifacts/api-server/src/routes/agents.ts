@@ -12,6 +12,7 @@ import {
   canViewAllLocations,
   requireAccount,
   requireActiveMembership,
+  requirePermission,
 } from "../middleware/auth";
 import { AI_MODELS } from "../lib/ai-config";
 import { logger } from "../lib/logger";
@@ -36,6 +37,14 @@ type AgentRecommendation = {
   recommendedTransferQty?: number;
   recommendedPurchaseQty?: number;
   message: string;
+};
+type RestockWarehouseMatch = {
+  id: number;
+  name: string;
+  category: string;
+  quantity: number;
+  barcode: string | null;
+  productId: number | null;
 };
 type LocationInsight = {
   location: string;
@@ -140,6 +149,66 @@ function storeStatus(item: typeof itemsTable.$inferSelect) {
 function recommendedTransfer(item: typeof itemsTable.$inferSelect) {
   if (item.quantity >= item.minQuantity) return 0;
   return Math.max(0, item.maxQuantity - item.quantity);
+}
+
+function normalizedBarcode(value: string | null | undefined): string | null {
+  const normalized = value?.trim();
+  return normalized ? normalized : null;
+}
+
+function parseParamId(value: string | string[] | undefined): number | null {
+  if (typeof value !== "string") return null;
+  const id = Number.parseInt(value, 10);
+  return Number.isNaN(id) ? null : id;
+}
+
+async function findRestockWarehouseMatch(
+  accountId: number,
+  storeItem: typeof itemsTable.$inferSelect,
+): Promise<RestockWarehouseMatch | null> {
+  if (storeItem.productId !== null) {
+    const [byProduct] = await db
+      .select()
+      .from(warehouseItemsTable)
+      .where(
+        and(
+          eq(warehouseItemsTable.accountId, accountId),
+          eq(warehouseItemsTable.productId, storeItem.productId),
+        ),
+      )
+      .orderBy(desc(warehouseItemsTable.quantity), asc(warehouseItemsTable.name))
+      .limit(1);
+    if (byProduct) return byProduct;
+  }
+
+  const barcode = normalizedBarcode(storeItem.barcode);
+  if (barcode) {
+    const [byBarcode] = await db
+      .select()
+      .from(warehouseItemsTable)
+      .where(
+        and(
+          eq(warehouseItemsTable.accountId, accountId),
+          eq(warehouseItemsTable.barcode, barcode),
+        ),
+      )
+      .orderBy(desc(warehouseItemsTable.quantity), asc(warehouseItemsTable.name))
+      .limit(1);
+    if (byBarcode) return byBarcode;
+  }
+
+  const [byName] = await db
+    .select()
+    .from(warehouseItemsTable)
+    .where(
+      and(
+        eq(warehouseItemsTable.accountId, accountId),
+        eq(warehouseItemsTable.name, storeItem.name),
+      ),
+    )
+    .orderBy(desc(warehouseItemsTable.quantity), asc(warehouseItemsTable.name))
+    .limit(1);
+  return byName ?? null;
 }
 
 function buildLocationInsights(storeItems: Array<typeof itemsTable.$inferSelect>): LocationInsight[] {
@@ -617,6 +686,73 @@ ${JSON.stringify(compactRecommendations)}`;
 
 router.get("/agents/housekeeping", async (req, res) => {
   res.json(await buildHousekeepingContext(req));
+});
+
+router.get("/agents/restock-review/:itemId", requirePermission("transfer_inventory"), async (req, res) => {
+  const itemId = parseParamId(req.params.itemId);
+  if (itemId === null) {
+    res.status(400).json({ error: "Invalid item id" });
+    return;
+  }
+
+  const [storeItem] = await db
+    .select()
+    .from(itemsTable)
+    .where(and(eq(itemsTable.accountId, req.account!.id), eq(itemsTable.id, itemId)))
+    .limit(1);
+
+  if (!storeItem) {
+    res.status(404).json({ error: "Store item not found" });
+    return;
+  }
+
+  if (!canViewAllLocations(req)) {
+    const allowed =
+      (storeItem.locationId !== null && (req.allowedLocationIds ?? []).includes(storeItem.locationId)) ||
+      (req.authUser?.assignedLocations ?? []).includes(storeItem.location);
+    if (!allowed) {
+      res.status(403).json({ error: "Permission denied for this store location" });
+      return;
+    }
+  }
+
+  const status = storeStatus(storeItem);
+  const recommendedTransferQty = recommendedTransfer(storeItem);
+  const warehouseItem = await findRestockWarehouseMatch(req.account!.id, storeItem);
+
+  res.json({
+    storeItem: {
+      id: storeItem.id,
+      name: storeItem.name,
+      category: storeItem.category,
+      location: storeItem.location,
+      quantity: storeItem.quantity,
+      minQuantity: storeItem.minQuantity,
+      maxQuantity: storeItem.maxQuantity,
+      barcode: storeItem.barcode ?? null,
+      productId: storeItem.productId ?? null,
+      status,
+    },
+    recommendation: {
+      recommendedTransferQty,
+      canTransfer: Boolean(warehouseItem && recommendedTransferQty > 0 && warehouseItem.quantity >= recommendedTransferQty),
+      reason: warehouseItem
+        ? warehouseItem.quantity > 0
+          ? "Warehouse item matched. Confirm the transfer quantity before posting."
+          : "Warehouse item matched, but no warehouse units are available."
+        : "No matching warehouse item was found by product, barcode, or name.",
+    },
+    warehouseItem: warehouseItem
+      ? {
+          id: warehouseItem.id,
+          name: warehouseItem.name,
+          category: warehouseItem.category,
+          quantity: warehouseItem.quantity,
+          barcode: warehouseItem.barcode ?? null,
+          productId: warehouseItem.productId ?? null,
+        }
+      : null,
+  });
 });
 
 router.post("/agents/conversation", async (req, res) => {

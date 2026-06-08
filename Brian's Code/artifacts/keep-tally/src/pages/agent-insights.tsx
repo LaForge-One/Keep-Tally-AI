@@ -1,12 +1,23 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type { ElementType } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Layout } from "@/components/layout";
 import { PageHeader } from "@/components/page-header";
+import { useAuth } from "@/contexts/auth-context";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import { useToast } from "@/hooks/use-toast";
 import {
   AlertTriangle,
   ArrowRightLeft,
@@ -15,6 +26,7 @@ import {
   CheckCircle2,
   Loader2,
   MessageSquareText,
+  PackageCheck,
   RefreshCw,
   Send,
   ShieldCheck,
@@ -76,6 +88,34 @@ type ConversationResponse = {
   };
 };
 
+type RestockReviewResponse = {
+  storeItem: {
+    id: number;
+    name: string;
+    category: string;
+    location: string;
+    quantity: number;
+    minQuantity: number;
+    maxQuantity: number;
+    barcode: string | null;
+    productId: number | null;
+    status: string;
+  };
+  recommendation: {
+    recommendedTransferQty: number;
+    canTransfer: boolean;
+    reason: string;
+  };
+  warehouseItem: {
+    id: number;
+    name: string;
+    category: string;
+    quantity: number;
+    barcode: string | null;
+    productId: number | null;
+  } | null;
+};
+
 const GROUPS: Record<RecommendationType, { title: string; label: string; icon: ElementType }> = {
   store_restock: {
     title: "Store Restock",
@@ -131,7 +171,15 @@ function hasUsableConversation(data: HousekeepingResponse | undefined, error: un
   return Boolean(data && !error);
 }
 
-function RecommendationRow({ rec }: { rec: AgentRecommendation }) {
+function RecommendationRow({
+  rec,
+  canReviewRestock,
+  onReviewRestock,
+}: {
+  rec: AgentRecommendation;
+  canReviewRestock: boolean;
+  onReviewRestock: (rec: AgentRecommendation) => void;
+}) {
   const qty = recommendationQty(rec);
   const range =
     rec.type === "warehouse_reorder"
@@ -166,7 +214,19 @@ function RecommendationRow({ rec }: { rec: AgentRecommendation }) {
           <p className="text-muted-foreground">{rec.type === "warehouse_reorder" ? "Buy" : "Move"}</p>
         </div>
       </div>
-      <Button variant="outline" size="sm" disabled title="Draft actions will be added after review">
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={rec.type !== "store_restock" || !canReviewRestock}
+        title={
+          rec.type !== "store_restock"
+            ? "Review actions are currently available for store restock recommendations"
+            : canReviewRestock
+              ? "Review warehouse transfer details"
+              : "Transfer permission is required to review restock actions"
+        }
+        onClick={() => onReviewRestock(rec)}
+      >
         Review
       </Button>
     </div>
@@ -174,12 +234,18 @@ function RecommendationRow({ rec }: { rec: AgentRecommendation }) {
 }
 
 export default function AgentInsightsPage() {
+  const { hasPermission } = useAuth();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [chatInput, setChatInput] = useState("");
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([WELCOME_MESSAGE]);
   const [chatLoading, setChatLoading] = useState(false);
   const [chatError, setChatError] = useState("");
   const [page, setPage] = useState(1);
+  const [selectedRestock, setSelectedRestock] = useState<AgentRecommendation | null>(null);
+  const [transferQty, setTransferQty] = useState("");
   const chatEndRef = useRef<HTMLDivElement | null>(null);
+  const canReviewRestock = hasPermission("transfer_inventory");
 
   const { data, isLoading, isFetching, refetch, error } = useQuery<HousekeepingResponse>({
     queryKey: ["agent-housekeeping"],
@@ -190,6 +256,61 @@ export default function AgentInsightsPage() {
     },
     staleTime: 30_000,
     refetchInterval: 60_000,
+  });
+
+  const reviewQuery = useQuery<RestockReviewResponse>({
+    queryKey: ["agent-restock-review", selectedRestock?.itemId],
+    queryFn: async () => {
+      if (!selectedRestock) throw new Error("No restock recommendation selected");
+      const res = await fetch(`${BASE}/api/agents/restock-review/${selectedRestock.itemId}`, {
+        credentials: "include",
+      });
+      const payload = await res.json();
+      if (!res.ok) throw new Error(payload.error ?? "Failed to load restock review");
+      return payload;
+    },
+    enabled: Boolean(selectedRestock),
+  });
+
+  const transferMutation = useMutation({
+    mutationFn: async () => {
+      const review = reviewQuery.data;
+      if (!review?.warehouseItem) throw new Error("No matching warehouse item is available");
+      const unitsTransferred = Number.parseInt(transferQty, 10);
+      if (!Number.isInteger(unitsTransferred) || unitsTransferred < 1) throw new Error("Enter a transfer quantity greater than zero");
+
+      const res = await fetch(`${BASE}/api/warehouse/${review.warehouseItem.id}/transfer`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          storeLocation: review.storeItem.location,
+          storeItemId: review.storeItem.id,
+          unitsTransferred,
+          notes: `Agent Insights restock review for ${review.storeItem.name}`,
+        }),
+      });
+      const payload = await res.json();
+      if (!res.ok) throw new Error(payload.error ?? "Failed to create transfer");
+      return payload as { newWarehouseQty: number };
+    },
+    onSuccess: (payload) => {
+      toast({
+        title: "Transfer posted",
+        description: `Restock transfer saved. Warehouse quantity is now ${payload.newWarehouseQty}.`,
+      });
+      setSelectedRestock(null);
+      setTransferQty("");
+      void refetch();
+      void queryClient.invalidateQueries({ queryKey: ["agent-housekeeping"] });
+    },
+    onError: (err) => {
+      toast({
+        title: "Transfer not posted",
+        description: err instanceof Error ? err.message : "Review the recommendation and try again.",
+        variant: "destructive",
+      });
+    },
   });
 
   const totalRecommendations = data?.recommendations.length ?? 0;
@@ -207,6 +328,11 @@ export default function AgentInsightsPage() {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [chatMessages, chatLoading]);
+
+  useEffect(() => {
+    if (!reviewQuery.data) return;
+    setTransferQty(String(Math.max(1, reviewQuery.data.recommendation.recommendedTransferQty)));
+  }, [reviewQuery.data]);
 
   const grouped = useMemo(() => {
     const map = new Map<RecommendationType, AgentRecommendation[]>();
@@ -286,6 +412,29 @@ export default function AgentInsightsPage() {
     setChatInput("");
   };
 
+  const openRestockReview = (rec: AgentRecommendation) => {
+    if (rec.type !== "store_restock") return;
+    setSelectedRestock(rec);
+    setTransferQty(String(Math.max(1, rec.recommendedTransferQty ?? 1)));
+  };
+
+  const closeRestockReview = (open: boolean) => {
+    if (open) return;
+    setSelectedRestock(null);
+    setTransferQty("");
+    transferMutation.reset();
+  };
+
+  const review = reviewQuery.data;
+  const requestedQty = Math.max(0, Number.parseInt(transferQty, 10) || 0);
+  const warehouseAvailable = review?.warehouseItem?.quantity ?? 0;
+  const canSubmitTransfer =
+    Boolean(review?.warehouseItem) &&
+    requestedQty > 0 &&
+    requestedQty <= warehouseAvailable &&
+    !reviewQuery.isLoading &&
+    !transferMutation.isPending;
+
   return (
     <Layout>
       <div className="space-y-5">
@@ -299,6 +448,120 @@ export default function AgentInsightsPage() {
             </Button>
           }
         />
+
+        <Dialog open={Boolean(selectedRestock)} onOpenChange={closeRestockReview}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <PackageCheck className="h-5 w-5 text-primary" />
+                Review Store Restock
+              </DialogTitle>
+              <DialogDescription>
+                Confirm the warehouse-to-store transfer before writing inventory changes.
+              </DialogDescription>
+            </DialogHeader>
+
+            {reviewQuery.isLoading ? (
+              <div className="space-y-3">
+                <Skeleton className="h-20 w-full rounded-lg" />
+                <Skeleton className="h-28 w-full rounded-lg" />
+              </div>
+            ) : reviewQuery.error ? (
+              <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+                <div className="flex items-center gap-2 font-semibold">
+                  <AlertTriangle className="h-4 w-4" />
+                  Could not load restock review.
+                </div>
+                <p className="mt-1">{reviewQuery.error instanceof Error ? reviewQuery.error.message : "Try refreshing Agent Insights."}</p>
+              </div>
+            ) : review ? (
+              <div className="space-y-4">
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <div className="rounded-lg border border-border bg-muted/20 p-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Store</p>
+                    <p className="mt-1 text-sm font-bold text-foreground">{review.storeItem.location}</p>
+                  </div>
+                  <div className="rounded-lg border border-border bg-muted/20 p-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Current</p>
+                    <p className="mt-1 text-sm font-bold text-foreground">{review.storeItem.quantity}</p>
+                  </div>
+                  <div className="rounded-lg border border-border bg-muted/20 p-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Target Range</p>
+                    <p className="mt-1 text-sm font-bold text-foreground">{review.storeItem.minQuantity}-{review.storeItem.maxQuantity}</p>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-border p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-bold text-foreground">{review.storeItem.name}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">{review.recommendation.reason}</p>
+                    </div>
+                    <Badge
+                      variant="outline"
+                      className={
+                        review.warehouseItem && review.warehouseItem.quantity > 0
+                          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                          : "border-red-200 bg-red-50 text-red-700"
+                      }
+                    >
+                      {review.warehouseItem && review.warehouseItem.quantity > 0 ? "Warehouse match" : "Blocked"}
+                    </Badge>
+                  </div>
+
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-md bg-muted/30 p-3">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Recommended Move</p>
+                      <p className="mt-1 text-2xl font-black text-primary">{review.recommendation.recommendedTransferQty}</p>
+                    </div>
+                    <div className="rounded-md bg-muted/30 p-3">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Warehouse Available</p>
+                      <p className="mt-1 text-2xl font-black text-foreground">{warehouseAvailable}</p>
+                    </div>
+                  </div>
+
+                  {review.warehouseItem && (
+                    <div className="mt-4 rounded-md border border-border bg-background p-3 text-xs text-muted-foreground">
+                      <p className="font-semibold text-foreground">{review.warehouseItem.name}</p>
+                      <p className="mt-1">
+                        {review.warehouseItem.category}
+                        {review.warehouseItem.barcode ? ` · UPC ${review.warehouseItem.barcode}` : ""}
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <label htmlFor="agent-restock-transfer-qty" className="text-sm font-semibold text-foreground">
+                    Transfer quantity
+                  </label>
+                  <Input
+                    id="agent-restock-transfer-qty"
+                    type="number"
+                    min={1}
+                    max={warehouseAvailable || undefined}
+                    value={transferQty}
+                    onChange={(event) => setTransferQty(event.target.value)}
+                    disabled={!review.warehouseItem || transferMutation.isPending}
+                  />
+                  {requestedQty > warehouseAvailable && (
+                    <p className="text-xs font-medium text-red-600">Transfer quantity cannot exceed warehouse availability.</p>
+                  )}
+                </div>
+              </div>
+            ) : null}
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => closeRestockReview(false)} disabled={transferMutation.isPending}>
+                Cancel
+              </Button>
+              <Button onClick={() => transferMutation.mutate()} disabled={!canSubmitTransfer}>
+                {transferMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ArrowRightLeft className="mr-2 h-4 w-4" />}
+                Post Transfer
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         <div className="grid gap-3 md:grid-cols-4">
           <div className="rounded-lg border border-border bg-card p-4 shadow-sm">
@@ -520,7 +783,12 @@ export default function AgentInsightsPage() {
                   </div>
                   <div>
                     {recs.map((rec) => (
-                      <RecommendationRow key={`${rec.type}-${rec.itemId}-${rec.location ?? "warehouse"}`} rec={rec} />
+                      <RecommendationRow
+                        key={`${rec.type}-${rec.itemId}-${rec.location ?? "warehouse"}`}
+                        rec={rec}
+                        canReviewRestock={canReviewRestock}
+                        onReviewRestock={openRestockReview}
+                      />
                     ))}
                   </div>
                 </section>
