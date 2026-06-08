@@ -15,4 +15,5 @@ export * from "./warehouse-items";
 export * from "./warehouse-purchases";
 export * from "./warehouse-transfers";
 export * from "./users";
+export * from "./notifications";
 

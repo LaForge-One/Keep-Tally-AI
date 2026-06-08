@@ -68,6 +68,16 @@ interface SidebarProps {
   onLogout: () => void;
 }
 
+type HeaderNotification = {
+  id: number;
+  eventType: string;
+  severity: string;
+  title: string;
+  message: string;
+  readAt: string | null;
+  createdAt: string;
+};
+
 function SidebarNav({
   nav,
   location,
@@ -305,8 +315,21 @@ export function Layout({ children }: { children: ReactNode }) {
     staleTime: 60_000,
   });
 
-  const alertCount =
+  const { data: notificationData, refetch: refetchNotifications } = useQuery({
+    queryKey: ["header-notifications"],
+    queryFn: async () => {
+      const res = await fetch(`${BASE}/api/notifications?limit=5&unreadOnly=true`, {
+        credentials: "include",
+      });
+      if (!res.ok) return { unreadCount: 0, notifications: [] as HeaderNotification[] };
+      return res.json() as Promise<{ unreadCount: number; notifications: HeaderNotification[] }>;
+    },
+    staleTime: 30_000,
+  });
+
+  const inventoryAlertCount =
     (summary?.belowParCount ?? 0) + (summary?.outOfStockCount ?? 0);
+  const alertCount = notificationData?.unreadCount ?? inventoryAlertCount;
 
   const nav: NavItem[] = [
     { path: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -383,6 +406,22 @@ export function Layout({ children }: { children: ReactNode }) {
       return;
     }
     navigate("/");
+  }
+
+  async function markNotificationRead(id: number) {
+    await fetch(`${BASE}/api/notifications/${id}/read`, {
+      method: "POST",
+      credentials: "include",
+    });
+    await refetchNotifications();
+  }
+
+  async function markAllNotificationsRead() {
+    await fetch(`${BASE}/api/notifications/read-all`, {
+      method: "POST",
+      credentials: "include",
+    });
+    await refetchNotifications();
   }
 
   const sidebarProps: SidebarProps = {
@@ -538,41 +577,81 @@ export function Layout({ children }: { children: ReactNode }) {
             </div>
           </form>
 
-          <button
-            className="relative grid place-items-center rounded-lg"
-            style={{
-              width: 36,
-              height: 36,
-              border: "1px solid #d8e2ee",
-              background: "#fff",
-              color: "#64748b",
-              transition: "background 150ms ease",
-            }}
-            onClick={() => navigate("/inventory")}
-            aria-label={
-              alertCount > 0
-                ? `${alertCount} items need attention`
-                : "No alerts"
-            }
-          >
-            <Bell className="h-4 w-4" />
-            {alertCount > 0 && (
-              <span
-                className="absolute grid place-items-center border-2 border-white font-black text-white"
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                className="relative grid place-items-center rounded-lg"
                 style={{
-                  top: -6,
-                  right: -6,
-                  minWidth: 18,
-                  height: 18,
-                  borderRadius: 999,
-                  background: "#ef4444",
-                  fontSize: 10,
+                  width: 36,
+                  height: 36,
+                  border: "1px solid #d8e2ee",
+                  background: "#fff",
+                  color: "#64748b",
+                  transition: "background 150ms ease",
                 }}
+                aria-label={
+                  alertCount > 0
+                    ? `${alertCount} notifications need attention`
+                    : "No notifications"
+                }
               >
-                {alertCount > 99 ? "99+" : alertCount}
-              </span>
-            )}
-          </button>
+                <Bell className="h-4 w-4" />
+                {alertCount > 0 && (
+                  <span
+                    className="absolute grid place-items-center border-2 border-white font-black text-white"
+                    style={{
+                      top: -6,
+                      right: -6,
+                      minWidth: 18,
+                      height: 18,
+                      borderRadius: 999,
+                      background: "#ef4444",
+                      fontSize: 10,
+                    }}
+                  >
+                    {alertCount > 99 ? "99+" : alertCount}
+                  </span>
+                )}
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-80">
+              <div className="flex items-center justify-between gap-3 px-2 py-1.5">
+                <div>
+                  <p className="text-xs font-semibold text-slate-900">Notifications</p>
+                  <p className="text-[11px] text-slate-500">{alertCount} unread</p>
+                </div>
+                <button
+                  type="button"
+                  className="text-[11px] font-semibold text-primary disabled:text-slate-400"
+                  disabled={alertCount === 0}
+                  onClick={markAllNotificationsRead}
+                >
+                  Mark all read
+                </button>
+              </div>
+              <DropdownMenuSeparator />
+              {(notificationData?.notifications ?? []).length === 0 ? (
+                <div className="px-2 py-3 text-xs text-slate-500">
+                  No unread notification events. Inventory alert count is still available from the dashboard.
+                </div>
+              ) : (
+                (notificationData?.notifications ?? []).map((event) => (
+                  <DropdownMenuItem
+                    key={event.id}
+                    className="flex cursor-pointer flex-col items-start gap-1 whitespace-normal"
+                    onClick={() => markNotificationRead(event.id)}
+                  >
+                    <span className="text-xs font-semibold text-slate-900">{event.title}</span>
+                    <span className="text-[11px] leading-relaxed text-slate-500">{event.message}</span>
+                  </DropdownMenuItem>
+                ))
+              )}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => navigate("/settings")}>
+                <Settings className="mr-2 h-4 w-4" /> Notification Settings
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
 
           {currentUser && (
             <DropdownMenu>

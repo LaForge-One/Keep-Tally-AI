@@ -16,6 +16,7 @@ import warehouseWriteFixesRouter from "./warehouse-write-fixes";
 import warehouseRouter from "./warehouse";
 import voiceRouter from "./voice";
 import agentsRouter from "./agents";
+import notificationsRouter from "./notifications";
 import { requireAuth, requirePermission } from "../middleware/auth";
 import { commandRateLimit } from "../middlewares/rateLimit";
 
@@ -42,6 +43,7 @@ router.use(warehouseWriteFixesRouter);
 router.use(warehouseRouter);
 router.use(requirePermission("use_voice_mode"), voiceRouter);
 router.use(agentsRouter);
+router.use(notificationsRouter);
 
 export default router;
 
