@@ -1,0 +1,6 @@
+services:
+  keeptally:
+    network_mode: host
+    environment:
+      NODE_ENV: test
+      PORT: 3000
