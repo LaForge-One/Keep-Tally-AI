@@ -3,7 +3,7 @@ import { Html5Qrcode } from "html5-qrcode";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
-import { useSelectedLocation, LOCATIONS } from "@/contexts/location-context";
+import { useSelectedLocation } from "@/contexts/location-context";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   getListItemsQueryKey,
@@ -107,7 +107,7 @@ export function InventoryScanner({
   const defaultCreateLocation =
     inventoryType === "warehouse"
       ? "Warehouse"
-      : (selectedLocation ?? LOCATIONS[0]);
+      : (selectedLocation ?? "");
 
   const [phase, setPhase] = useState<Phase>("camera");
   const [cameraActive, setCameraActive] = useState(false);

@@ -10,7 +10,6 @@ import {
   db,
   itemsTable,
   locationsTable,
-  warehouseItemsTable,
   type ItemRow,
 } from "@workspace/db";
 import { logger } from "../lib/logger";
@@ -19,7 +18,6 @@ import {
   canViewAllLocations,
   requireAccount,
   requireActiveMembership,
-  requirePermission,
 } from "../middleware/auth";
 import { AI_LIMITS, AI_MODELS } from "../lib/ai-config";
 import { getErrorMessage } from "../lib/http-errors";
@@ -50,7 +48,7 @@ const TTS_VOICES = [
 type TtsVoice = (typeof TTS_VOICES)[number];
 const DEFAULT_TTS_VOICE: TtsVoice = TTS_VOICES.includes(process.env.AI_TTS_VOICE as TtsVoice)
   ? (process.env.AI_TTS_VOICE as TtsVoice)
-  : "nova";
+  : "shimmer";
 
 class VoiceTimeoutError extends Error {
   constructor(message: string) {
@@ -267,49 +265,25 @@ router.post(
 
     try {
       const audioBuffer = req.file.buffer;
-      const glossary = typeof req.body?.glossary === "string" ? req.body.glossary.slice(0, 3000) : "";
-      const transcribePrompt = glossary
-        ? `This is a KeepTally inventory voice count. Prefer exact spellings from these active location item names, categories, UPCs, and aliases when words sound similar: ${glossary}. Operators may say item names followed by counts, for example "Coke Zero five" or "three Red Bull". Also expect route names, warehouse names, minimum and maximum stock levels, theft, spoilage, comp, damaged, missing from bin, done, stop, finish, yes, and no.`
-        : undefined;
-      const requestedAt = Date.now();
       logger.info({
         requestId: req.id,
         bytes: audioBuffer.length,
         mimetype: req.file.mimetype,
-        glossaryTerms: glossary ? glossary.split(",").length : 0,
         model: process.env.AI_TRANSCRIBE_MODEL ?? "gpt-4o-mini-transcribe",
       }, "Voice transcription requested");
-      const conversionStartedAt = Date.now();
-      const { buffer, format, converted, detected } = await withTimeout(
+      const { buffer, format } = await withTimeout(
         ensureCompatibleFormat(audioBuffer),
         VOICE_FORMAT_TIMEOUT_MS,
         "Audio format conversion timed out",
       );
-      const conversionMs = Date.now() - conversionStartedAt;
-      logger.info({ requestId: req.id, bytes: buffer.length, format, converted, detected, conversionMs }, "Voice audio prepared");
-      const transcribeStartedAt = Date.now();
+      logger.info({ requestId: req.id, bytes: buffer.length, format }, "Voice audio converted");
       const transcript = await withTimeout(
-        speechToText(buffer, format, transcribePrompt),
+        speechToText(buffer, format),
         VOICE_TRANSCRIBE_TIMEOUT_MS,
         "Voice transcription timed out",
       );
-      const transcribeMs = Date.now() - transcribeStartedAt;
-      logger.info({ requestId: req.id, transcriptLength: transcript.length, transcribeMs }, "Voice transcription completed");
-      res.json({
-        transcript: transcript.trim(),
-        diagnostics: {
-          requestId: req.id,
-          inputBytes: audioBuffer.length,
-          outputBytes: buffer.length,
-          inputMimeType: req.file.mimetype,
-          detectedFormat: detected,
-          transcribeFormat: format,
-          converted,
-          conversionMs,
-          transcribeMs,
-          totalMs: Date.now() - requestedAt,
-        },
-      });
+      logger.info({ requestId: req.id, transcriptLength: transcript.length }, "Voice transcription completed");
+      res.json({ transcript: transcript.trim() });
     } catch (err) {
       logger.error({ err, requestId: req.id }, "Voice transcription failed");
       res.status(voiceErrorStatus(err)).json({
@@ -365,94 +339,6 @@ router.post("/voice/speak", async (req: Request, res: Response) => {
   }
 });
 
-/* ── POST /voice/warehouse/add-item/draft ────────────────────────────
-   Accepts a transcript, returns a structured warehouse item draft.
-   This route never writes inventory; confirmed creation uses POST /warehouse.
-──────────────────────────────────────────────────────────────────── */
-router.post(
-  "/voice/warehouse/add-item/draft",
-  requirePermission("edit_warehouse"),
-  async (req: Request, res: Response) => {
-    if (!canViewAllLocations(req)) {
-      res.status(403).json({ error: "Permission denied for warehouse inventory" });
-      return;
-    }
-
-    const parsed = AddItemDraftSchema.omit({ location: true }).safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ error: "Invalid request", details: parsed.error.issues });
-      return;
-    }
-
-    const { transcript } = parsed.data;
-    const location = "Warehouse";
-
-    try {
-      logger.info({
-        requestId: req.id,
-        transcriptLength: transcript.length,
-      }, "Voice warehouse add-item draft requested");
-
-      const prompt = buildAddItemDraftPrompt(transcript, location);
-      const response = await openai.chat.completions.create({
-        model: AI_MODELS.voiceParser,
-        max_completion_tokens: AI_LIMITS.voiceParserMaxOutputTokens,
-        messages: [{ role: "user", content: prompt }],
-        response_format: { type: "json_object" },
-      });
-      const content = response.choices[0]?.message?.content?.trim() ?? "";
-      const raw = content ? JSON.parse(content) as Record<string, unknown> : {};
-      const draft: AddItemDraft = {
-        name: normalizeDraftString(raw.name),
-        category: normalizeDraftString(raw.category),
-        quantity: normalizeDraftNumber(raw.quantity),
-        minQuantity: normalizeDraftNumber(raw.minQuantity),
-        maxQuantity: normalizeDraftNumber(raw.maxQuantity),
-        barcode: normalizeDraftBarcode(raw.barcode),
-        location,
-      };
-      const warnings = Array.isArray(raw.warnings)
-        ? raw.warnings.filter((warning): warning is string => typeof warning === "string")
-        : [];
-      const result = finalizeAddItemDraft(draft, warnings, clampConfidence(raw.confidence));
-
-      if (result.draft.name) {
-        const duplicateRows = await db
-          .select({ id: warehouseItemsTable.id, name: warehouseItemsTable.name })
-          .from(warehouseItemsTable)
-          .where(
-            and(
-              eq(warehouseItemsTable.accountId, req.account!.id),
-              eq(warehouseItemsTable.name, result.draft.name),
-            ),
-          )
-          .limit(1);
-        if (duplicateRows.length > 0) {
-          result.warnings.push("A matching warehouse item already exists.");
-        }
-      }
-
-      logger.info({
-        requestId: req.id,
-        status: result.status,
-        missingFields: result.missingFields,
-        warnings: result.warnings,
-      }, "Voice warehouse add-item draft completed");
-      res.json(result);
-    } catch (err) {
-      logger.warn({ err, requestId: req.id }, "Voice warehouse add-item AI draft failed; using local parser");
-      const result = parseAddItemDraftFast(transcript, location);
-      res.json({
-        ...result,
-        warnings: [
-          ...result.warnings,
-          "AI draft parsing was unavailable, so KeepTally used local parsing.",
-        ],
-      });
-    }
-  },
-);
-
 /* ── POST /voice/parse ──────────────────────────────────────────────
    Accepts a transcript + list of items, returns structured action.
    mode: "quantity"  — user is answering "how many of [item] do you have?"
@@ -465,9 +351,6 @@ type ParseMode = "quantity" | "reason" | "custom";
 const ItemSchema = z.object({
   id: z.number(),
   name: z.string(),
-  category: z.string().optional(),
-  barcode: z.string().nullish(),
-  aliases: z.array(z.string()).optional(),
   parLevel: z.number(),
   minQuantity: z.number().optional(),
   maxQuantity: z.number().optional(),
@@ -477,7 +360,6 @@ const ParseSchema = z.object({
   transcript: z.string(),
   items: z.array(ItemSchema),
   mode: z.enum(["quantity", "reason", "custom"]).default("custom"),
-  sessionId: z.number().int().positive().nullable().optional(),
   currentItemName: z.string().optional(),
   currentParLevel: z.number().optional(),
   currentMinQuantity: z.number().optional(),
@@ -490,33 +372,8 @@ type ParseResult =
   | { action: "skip" }
   | { action: "done" }
   | { action: "reason"; reason: string }
-  | { action: "custom"; itemId: number; itemName: string; quantity: number; confidence?: number; alternates?: Array<{ itemId: number; itemName: string; confidence: number }> }
-  | { action: "clarify"; candidates: Array<{ itemId: number; itemName: string; confidence: number }> }
+  | { action: "custom"; itemId: number; itemName: string; quantity: number }
   | { action: "unknown" };
-
-const AddItemDraftSchema = z.object({
-  transcript: z.string().trim().min(1).max(1000),
-  location: z.string().trim().min(1).max(120),
-});
-
-type AddItemDraft = {
-  name: string | null;
-  category: string | null;
-  quantity: number | null;
-  minQuantity: number | null;
-  maxQuantity: number | null;
-  barcode: string | null;
-  location: string;
-};
-
-type AddItemDraftResult = {
-  status: "draft" | "need_more_info";
-  draft: AddItemDraft;
-  missingFields: string[];
-  warnings: string[];
-  confidence: number;
-  nextQuestion: string | null;
-};
 
 const WORD_MAP: Record<string, number> = {
   zero: 0,
@@ -550,67 +407,16 @@ const WORD_MAP: Record<string, number> = {
   hundred: 100,
 };
 
-const NUMBER_FILLER_WORDS = new Set([
-  "a",
-  "an",
-  "about",
-  "around",
-  "approximately",
-  "approx",
-  "only",
-  "just",
-  "left",
-  "remaining",
-  "total",
-]);
-
 function wordToNumber(text: string): number | null {
   const words = text.replace(/-/g, " ").split(/\s+/).filter(Boolean);
-  let total = 0;
-  let found = false;
-
   for (let index = 0; index < words.length; index += 1) {
-    const word = words[index]!;
-    if (NUMBER_FILLER_WORDS.has(word)) continue;
-
-    if (word === "couple") {
-      total += 2;
-      found = true;
-      continue;
-    }
-
-    if (word === "dozen") {
-      total = total === 0 ? 12 : total * 12;
-      found = true;
-      continue;
-    }
-
-    if (word === "half" && words[index + 1] === "dozen") {
-      total += 6;
-      found = true;
-      index += 1;
-      continue;
-    }
-
-    const value = WORD_MAP[word];
+    const value = WORD_MAP[words[index]!];
     if (value === undefined) continue;
-    found = true;
-
-    if (value === 100 && total > 0) {
-      total *= 100;
-      continue;
-    }
-
     const next = WORD_MAP[words[index + 1] ?? ""];
-    if (next !== undefined && value >= 20 && next < 10) {
-      total += value + next;
-      index += 1;
-      continue;
-    }
-
-    total += value;
+    if (next !== undefined && value >= 20 && next < 10) return value + next;
+    return value;
   }
-  return found ? total : null;
+  return null;
 }
 
 function parseQuantityFast(transcript: string, expected: number | undefined): ParseResult | null {
@@ -641,161 +447,13 @@ function parseReasonFast(transcript: string): ParseResult {
   return { action: "reason", reason: "Adjustment" };
 }
 
-function clampConfidence(value: unknown): number {
-  const parsed = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(parsed)) return 0;
-  return Math.max(0, Math.min(100, Math.round(parsed)));
-}
-
-function normalizeDraftString(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
-}
-
-function normalizeDraftNumber(value: unknown): number | null {
-  if (typeof value === "number" && Number.isFinite(value)) return Math.max(0, Math.floor(value));
-  if (typeof value !== "string") return null;
-  const parsed = Number.parseInt(value.replace(/[^0-9-]/g, ""), 10);
-  return Number.isFinite(parsed) ? Math.max(0, parsed) : null;
-}
-
-function normalizeDraftBarcode(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const normalized = value.replace(/[^0-9a-z]/gi, "").toLowerCase();
-  return normalized.length > 0 ? normalized : null;
-}
-
-function parseDraftNumberAfter(text: string, labels: string[]): number | null {
-  for (const label of labels) {
-    const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const match = text.match(new RegExp(`\\b${escaped}\\s+(\\d+)\\b`, "i"));
-    if (match) return Number.parseInt(match[1]!, 10);
-    const phrase = text.match(new RegExp(`\\b${escaped}\\s+([a-z\\s-]{1,40})(?:,|\\b(?:minimum|min|max|maximum|barcode|upc|category|quantity)\\b|$)`, "i"));
-    if (phrase) {
-      const spoken = wordToNumber(phrase[1] ?? "");
-      if (spoken !== null) return spoken;
-    }
-  }
-  return null;
-}
-
-function parseAddItemDraftFast(transcript: string, location: string): AddItemDraftResult {
-  const text = transcript.toLowerCase().replace(/[.,]/g, " ").replace(/\s+/g, " ").trim();
-  const quantity = parseDraftNumberAfter(text, ["quantity", "count", "starting quantity", "starting count"]);
-  const minQuantity = parseDraftNumberAfter(text, ["minimum", "min", "minimum quantity", "minimum count"]);
-  const maxQuantity = parseDraftNumberAfter(text, ["maximum", "max", "maximum quantity", "maximum count"]);
-  const categoryMatch = text.match(/\bcategory\s+([a-z0-9 &/-]{2,40}?)(?:\s+\b(?:quantity|count|minimum|min|maximum|max|barcode|upc)\b|$)/i);
-  const barcodeMatch = text.match(/\b(?:barcode|upc|code)\s+([a-z0-9\s-]{4,40})/i);
-  const category = categoryMatch?.[1]?.trim() ?? null;
-  const barcode = barcodeMatch ? normalizeDraftBarcode(barcodeMatch[1]) : null;
-  let nameText = text
-    .replace(/\b(add|create|new|item|inventory|product)\b/g, " ")
-    .replace(/\bcategory\s+[a-z0-9 &/-]{2,40}?(\s+\b(?:quantity|count|minimum|min|maximum|max|barcode|upc)\b|$)/i, " ")
-    .replace(/\b(?:quantity|count|starting quantity|starting count)\s+(\d+|[a-z\s-]{1,40})/gi, " ")
-    .replace(/\b(?:minimum|min|minimum quantity|minimum count)\s+(\d+|[a-z\s-]{1,40})/gi, " ")
-    .replace(/\b(?:maximum|max|maximum quantity|maximum count)\s+(\d+|[a-z\s-]{1,40})/gi, " ")
-    .replace(/\b(?:barcode|upc|code)\s+[a-z0-9\s-]{4,40}/gi, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  if (nameText.length > 80) nameText = nameText.slice(0, 80).trim();
-  const draft: AddItemDraft = {
-    name: nameText || null,
-    category: category ? category.replace(/\b\w/g, (char) => char.toUpperCase()) : null,
-    quantity,
-    minQuantity,
-    maxQuantity,
-    barcode,
-    location,
-  };
-  return finalizeAddItemDraft(draft, [], 45);
-}
-
-function finalizeAddItemDraft(draft: AddItemDraft, warnings: string[], confidence: number): AddItemDraftResult {
-  const missingFields: string[] = [];
-  if (!draft.name) missingFields.push("name");
-  if (!draft.category) missingFields.push("category");
-  if (draft.quantity === null) missingFields.push("quantity");
-  if (draft.minQuantity === null) missingFields.push("minQuantity");
-  if (draft.maxQuantity === null) missingFields.push("maxQuantity");
-  if (
-    draft.minQuantity !== null &&
-    draft.maxQuantity !== null &&
-    draft.minQuantity > draft.maxQuantity
-  ) {
-    warnings.push("Minimum quantity is greater than maximum quantity.");
-    missingFields.push("stockRange");
-  }
-  const status = missingFields.length === 0 ? "draft" : "need_more_info";
-  return {
-    status,
-    draft,
-    missingFields: [...new Set(missingFields)],
-    warnings: [...new Set(warnings)],
-    confidence,
-    nextQuestion:
-      status === "draft"
-        ? null
-        : `Please provide ${[...new Set(missingFields)].join(", ")} for ${draft.name ?? "the new item"}.`,
-  };
-}
-
-function buildAddItemDraftPrompt(transcript: string, location: string): string {
-  return `You are parsing a spoken inventory item creation request for KeepTally.
-The selected app location is "${location}". Do not choose another location.
-Transcript: "${transcript}"
-
-Return ONLY valid JSON, no markdown.
-
-Shape:
-{
-  "action": "create_item_draft" | "need_more_info",
-  "name": string | null,
-  "category": string | null,
-  "quantity": number | null,
-  "minQuantity": number | null,
-  "maxQuantity": number | null,
-  "barcode": string | null,
-  "confidence": number,
-  "warnings": string[],
-  "missingFields": string[],
-  "nextQuestion": string | null
-}
-
-Rules:
-- Required: name, category, quantity, minQuantity, maxQuantity.
-- Barcode/UPC is optional.
-- Convert spoken numbers into integers.
-- Normalize package size in the name when obvious, e.g. "twenty ounce" -> "20 oz".
-- Do not invent missing quantity, minimum, maximum, category, or barcode.
-- If minimum is greater than maximum, return need_more_info with a warning.
-- Keep names short and business-readable.`;
-}
-
 function canAccessItem(req: Request, item: ItemRow): boolean {
   if (canViewAllLocations(req)) return true;
   if (item.locationId !== null && (req.allowedLocationIds ?? []).includes(item.locationId)) return true;
   return canAccessLocation(req, item.location);
 }
 
-function normalizeLocationName(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
-}
-
-type VoiceSessionRow = NonNullable<Awaited<ReturnType<typeof findAccountSession>>>;
-
-function itemMatchesVoiceSession(item: ItemRow, session: VoiceSessionRow) {
-  if (session.locationId !== null) return item.locationId === session.locationId;
-  if (!session.locationName) return true;
-  return normalizeLocationName(item.location) === normalizeLocationName(session.locationName);
-}
-
-async function filterAllowedVoiceItems(
-  req: Request,
-  items: z.infer<typeof ItemSchema>[],
-  session: VoiceSessionRow | null = null,
-) {
+async function filterAllowedVoiceItems(req: Request, items: z.infer<typeof ItemSchema>[]) {
   if (items.length === 0) return [];
 
   const itemIds = [...new Set(items.map((item) => item.id))];
@@ -806,7 +464,6 @@ async function filterAllowedVoiceItems(
   const allowedIds = new Set(
     rows
       .filter((item) => canAccessItem(req, item))
-      .filter((item) => (session ? itemMatchesVoiceSession(item, session) : true))
       .map((item) => item.id),
   );
 
@@ -867,81 +524,28 @@ anything else → {"action":"reason","reason":"Adjustment"}`;
   }
 
   // mode === "custom"
-  const itemList = items.slice(0, 40).map((it) => {
+  const itemList = items.slice(0, 80).map((it) => {
     const min = it.minQuantity ?? it.parLevel;
     const max = it.maxQuantity ?? it.parLevel;
-    return {
-      id: it.id,
-      name: it.name,
-      category: it.category ?? null,
-      barcode: it.barcode ?? null,
-      aliases: it.aliases ?? [],
-      range: `${min}-${max}`,
-    };
-  });
+    return `${it.id}:"${it.name}" (range ${min}-${max})`;
+  }).join(", ");
   return `You are an inventory assistant parsing a voice command.
 The operator says an item name and a quantity count.
 Transcript: "${transcript}"
-Available items JSON: ${JSON.stringify(itemList)}
+Available items: [${itemList}]
 
 Return ONLY valid JSON, no other text.
 
 Rules:
-- Choose only from Available items JSON.
-- Match by name, barcode, alias, category, package size, and common spoken variants.
+- Match item by name (fuzzy, partial OK — "coke" matches "Coke Zero 20oz")
 - Extract the quantity number
 - If transcript says "done"/"stop"/"finish"/"exit" → {"action":"done"}
 - If no item found or no quantity → {"action":"unknown"}
-- If the best match is uncertain or multiple candidates are close → {"action":"clarify","candidates":[{"itemId":N,"itemName":"...","confidence":N}]}
-- Use "custom" only when confidence is 80 or higher.
 
 Examples:
-"coke zero 5" → {"action":"custom","itemId":42,"itemName":"Coke Zero 20oz","quantity":5,"confidence":91,"alternates":[]}
-"red bull three" → {"action":"custom","itemId":7,"itemName":"Red Bull 8.4oz","quantity":3,"confidence":88,"alternates":[]}
+"coke zero 5" → {"action":"custom","itemId":42,"itemName":"Coke Zero 20oz","quantity":5}
+"red bull three" → {"action":"custom","itemId":7,"itemName":"Red Bull 8.4oz","quantity":3}
 "done" → {"action":"done"}`;
-}
-
-function normalizeCustomParseResult(result: ParseResult, allowedItems: z.infer<typeof ItemSchema>[]): ParseResult {
-  if (result.action !== "custom") {
-    if (result.action === "clarify") {
-      return {
-        action: "clarify",
-        candidates: result.candidates
-          .filter((candidate) => allowedItems.some((item) => item.id === candidate.itemId))
-          .slice(0, 3),
-      };
-    }
-    return result;
-  }
-
-  const allowedItem = allowedItems.find((item) => item.id === result.itemId);
-  if (!allowedItem) return { action: "unknown" };
-
-  const confidence = clampConfidence(result.confidence ?? 0);
-  const alternates = (result.alternates ?? [])
-    .filter((candidate) => allowedItems.some((item) => item.id === candidate.itemId))
-    .map((candidate) => ({
-      ...candidate,
-      confidence: clampConfidence(candidate.confidence),
-    }))
-    .slice(0, 3);
-
-  if (confidence > 0 && confidence < 80) {
-    return {
-      action: "clarify",
-      candidates: [
-        { itemId: allowedItem.id, itemName: allowedItem.name, confidence },
-        ...alternates,
-      ].slice(0, 3),
-    };
-  }
-
-  return {
-    ...result,
-    itemName: allowedItem.name,
-    confidence: confidence || undefined,
-    alternates,
-  };
 }
 
 router.post("/voice/parse", async (req: Request, res: Response) => {
@@ -955,7 +559,6 @@ router.post("/voice/parse", async (req: Request, res: Response) => {
     transcript,
     items,
     mode,
-    sessionId,
     currentItemName,
     currentParLevel,
     currentMinQuantity,
@@ -969,16 +572,9 @@ router.post("/voice/parse", async (req: Request, res: Response) => {
   }
 
   try {
-    const session = sessionId ? await findAccountSession(req, sessionId) : null;
-    if (sessionId && !session) {
-      res.status(404).json({ error: "Voice count session not found", requestId: req.id });
-      return;
-    }
-
     logger.info({
       requestId: req.id,
       mode,
-      sessionId: session?.id ?? null,
       itemCount: items.length,
       transcriptLength: transcript.length,
     }, "Voice parse requested");
@@ -998,15 +594,8 @@ router.post("/voice/parse", async (req: Request, res: Response) => {
       return;
     }
 
-    const allowedItems = mode === "custom" ? await filterAllowedVoiceItems(req, items, session) : items;
-    logger.info({
-      requestId: req.id,
-      mode,
-      sessionId: session?.id ?? null,
-      sessionLocationId: session?.locationId ?? null,
-      sessionLocationName: session?.locationName ?? null,
-      allowedItemCount: allowedItems.length,
-    }, "Voice parse allowed items loaded");
+    const allowedItems = mode === "custom" ? await filterAllowedVoiceItems(req, items) : items;
+    logger.info({ requestId: req.id, mode, allowedItemCount: allowedItems.length }, "Voice parse allowed items loaded");
     const prompt = buildPrompt(
       transcript,
       mode,
@@ -1031,10 +620,6 @@ router.post("/voice/parse", async (req: Request, res: Response) => {
       result = content ? (JSON.parse(content) as ParseResult) : { action: "unknown" };
     } catch {
       result = { action: "unknown" };
-    }
-
-    if (mode === "custom") {
-      result = normalizeCustomParseResult(result, allowedItems);
     }
 
     logger.info({ requestId: req.id, mode, result }, "Voice parse completed");

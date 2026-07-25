@@ -3,6 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      network: host
       args:
         VITE_VOICE_COUNT_TTS_ENABLED: ${VITE_VOICE_COUNT_TTS_ENABLED:-false}
         VITE_VOICE_COUNT_CONFIRMATION_AUDIO_ENABLED: ${VITE_VOICE_COUNT_CONFIRMATION_AUDIO_ENABLED:-true}

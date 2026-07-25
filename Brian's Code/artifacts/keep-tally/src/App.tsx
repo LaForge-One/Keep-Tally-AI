@@ -16,7 +16,6 @@ import RouteSheetsPage from "@/pages/route-sheets";
 import OrderDetailPage from "@/pages/order-detail";
 import OrderPrintPage from "@/pages/order-print";
 import ImportPage from "@/pages/import";
-import ScanPage from "@/pages/scan";
 import WarehousePage from "@/pages/warehouse";
 import WarehouseDetailPage from "@/pages/warehouse-detail";
 import WarehouseVoicePage from "@/pages/warehouse-voice";
@@ -91,7 +90,6 @@ function Router() {
       <Route path="/orders/:id/print" component={() => <ProtectedRoute component={OrderPrintPage} />} />
       <Route path="/orders/:id" component={() => <ProtectedRoute component={OrderDetailPage} />} />
       <Route path="/import" component={() => <ProtectedRoute component={ImportPage} />} />
-      <Route path="/scan" component={() => <ProtectedRoute component={ScanPage} />} />
       <Route path="/warehouse/voice" component={() => <ProtectedRoute component={WarehouseVoicePage} />} />
       <Route path="/warehouse/purchases" component={() => <ProtectedRoute component={WarehousePurchasesPage} />} />      <Route path="/warehouse/:id" component={() => <ProtectedRoute component={WarehouseDetailPage} />} />
       <Route path="/warehouse" component={() => <ProtectedRoute component={WarehousePage} />} />

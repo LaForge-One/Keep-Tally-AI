@@ -18,11 +18,12 @@ import voiceRouter from "./voice";
 import agentsRouter from "./agents";
 import notificationsRouter from "./notifications";
 import { requireAuth, requirePermission } from "../middleware/auth";
-import { commandRateLimit } from "../middlewares/rateLimit";
+import { commandRateLimit, voiceRateLimit, loginRateLimit } from "../middlewares/rateLimit";
 
 const router: IRouter = Router();
 
 router.use(healthRouter);
+router.use("/auth/login", loginRateLimit);
 router.use(authRouter);
 
 router.use(requireAuth);
@@ -41,7 +42,7 @@ router.use(requirePermission("edit_store_inventory"), importRouter);
 router.use(requirePermission("scan_barcodes"), scanRouter);
 router.use(warehouseWriteFixesRouter);
 router.use(warehouseRouter);
-router.use(requirePermission("use_voice_mode"), voiceRouter);
+router.use(requirePermission("use_voice_mode"), voiceRateLimit, voiceRouter);
 router.use(agentsRouter);
 router.use(notificationsRouter);
 

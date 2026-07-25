@@ -97,7 +97,6 @@ add("db:latest lookup index migration", migrationFiles.includes("0006_lookup_ind
 add("db:store min/max migration", migrationFiles.includes("0008_store_min_max_stock.sql"), "0008_store_min_max_stock.sql");
 add("db:classification index migration", migrationFiles.includes("0009_classification_indexes.sql"), "0009_classification_indexes.sql");
 add("db:count session audit migration", migrationFiles.includes("0010_count_sessions.sql"), "0010_count_sessions.sql");
-add("db:archive lifecycle migration", migrationFiles.includes("0012_archive_lifecycle.sql"), "0012_archive_lifecycle.sql");
 add(
   "db:phase one relational index migration",
   migrationFiles.includes("0007_phase_one_relational_indexes.sql"),
@@ -162,17 +161,6 @@ if (databaseUrl) {
         "product_identifiers_account_product_idx",
         "items_account_product_location_idx",
         "warehouse_items_account_product_warehouse_idx",
-        "stockout_events_account_status_opened_idx",
-        "stockout_events_account_item_status_idx",
-        "stockout_events_account_location_status_opened_idx",
-        "history_archive_account_created_idx",
-        "history_archive_account_item_created_idx",
-        "count_sessions_archive_account_started_idx",
-        "count_sessions_archive_account_location_started_idx",
-        "count_session_events_archive_account_session_created_idx",
-        "count_session_events_archive_account_item_created_idx",
-        "stockout_events_archive_account_opened_idx",
-        "stockout_events_archive_account_item_opened_idx",
       ];
       const indexes = await client.query(
         `
@@ -190,31 +178,6 @@ if (databaseUrl) {
         "db:relational lookup indexes",
         missingIndexes.length === 0,
         missingIndexes.length === 0 ? `${requiredIndexes.length} present` : `missing=${missingIndexes.join(", ")}`,
-      );
-
-      const requiredTables = [
-        "stockout_events",
-        "history_archive",
-        "count_sessions_archive",
-        "count_session_events_archive",
-        "stockout_events_archive",
-      ];
-      const tables = await client.query(
-        `
-        select tablename
-        from pg_tables
-        where schemaname = 'public'
-          and tablename = any($1::text[])
-        order by tablename
-        `,
-        [requiredTables],
-      );
-      const presentTables = new Set(tables.rows.map((row) => row.tablename as string));
-      const missingTables = requiredTables.filter((tableName) => !presentTables.has(tableName));
-      add(
-        "db:archive lifecycle tables",
-        missingTables.length === 0,
-        missingTables.length === 0 ? `${requiredTables.length} present` : `missing=${missingTables.join(", ")}`,
       );
 
       const relationalHealth = await client.query(`

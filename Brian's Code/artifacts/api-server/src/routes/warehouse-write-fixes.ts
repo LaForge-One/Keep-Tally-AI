@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { z } from "zod";
 import {
   db,
@@ -397,40 +397,20 @@ router.post("/warehouse/:id/adjust", requirePermission("edit_warehouse"), async 
   if (!item) { res.status(404).json({ error: "Not found" }); return; }
 
   const { mode, quantity, reason } = parsed.data;
-  if (mode === "subtract" && item.quantity < quantity) {
+  const newQuantity = mode === "set" ? quantity : mode === "add" ? item.quantity + quantity : item.quantity - quantity;
+  if (newQuantity < 0) {
     res.status(400).json({ error: `Only ${item.quantity} units available in warehouse` });
     return;
   }
 
   const [updated] = await db
     .update(warehouseItemsTable)
-    .set({
-      quantity:
-        mode === "set"
-          ? quantity
-          : mode === "add"
-            ? sql`${warehouseItemsTable.quantity} + ${quantity}`
-            : sql`${warehouseItemsTable.quantity} - ${quantity}`,
-      lastUpdated: new Date(),
-    })
-    .where(
-      and(
-        eq(warehouseItemsTable.id, id),
-        eq(warehouseItemsTable.accountId, req.account!.id),
-        mode === "subtract" ? sql`${warehouseItemsTable.quantity} >= ${quantity}` : undefined,
-      ),
-    )
+    .set({ quantity: newQuantity, lastUpdated: new Date() })
+    .where(and(eq(warehouseItemsTable.id, id), eq(warehouseItemsTable.accountId, req.account!.id)))
     .returning();
 
-  if (!updated) {
-    res.status(mode === "subtract" ? 409 : 404).json({
-      error: mode === "subtract"
-        ? "Warehouse quantity changed before this adjustment could be saved. Reload and try again."
-        : "Not found",
-    });
-    return;
-  }
-  await recordWarehouseQuantityHistory({ req, item, previousQuantity: item.quantity, newQuantity: updated.quantity, reason });
+  if (!updated) { res.status(404).json({ error: "Not found" }); return; }
+  await recordWarehouseQuantityHistory({ req, item, previousQuantity: item.quantity, newQuantity, reason });
 
   res.json(serializeItem(updated));
 });
@@ -457,65 +437,52 @@ router.post("/warehouse/:id/receive", requirePermission("receive_purchases"), as
   const totalUnits = casesReceived * unitsPerCase;
   const costPerUnit = caseCost / unitsPerCase;
 
-  const result = await db.transaction(async (tx) => {
-    const [item] = await tx
-      .select()
-      .from(warehouseItemsTable)
-      .where(and(eq(warehouseItemsTable.id, id), eq(warehouseItemsTable.accountId, req.account!.id)))
-      .limit(1);
-    if (!item) return null;
+  const [item] = await db
+    .select()
+    .from(warehouseItemsTable)
+    .where(and(eq(warehouseItemsTable.id, id), eq(warehouseItemsTable.accountId, req.account!.id)))
+    .limit(1);
+  if (!item) { res.status(404).json({ error: "Not found" }); return; }
 
-    const warehouse = item.warehouseId ? { id: item.warehouseId } : await ensureDefaultWarehouse(req.account!.id);
-    const [purchase] = await tx.insert(warehousePurchasesTable).values({
-      accountId: req.account!.id,
+  const warehouse = item.warehouseId ? { id: item.warehouseId } : await ensureDefaultWarehouse(req.account!.id);
+  const [purchase] = await db.insert(warehousePurchasesTable).values({
+    accountId: req.account!.id,
+    warehouseId: warehouse.id,
+    warehouseItemId: id,
+    vendor,
+    caseCost,
+    casesReceived,
+    unitsPerCase,
+    totalUnits,
+    costPerUnit,
+    purchaseDate,
+    notes,
+  }).returning();
+
+  const newQty = item.quantity + totalUnits;
+  const [updated] = await db
+    .update(warehouseItemsTable)
+    .set({
       warehouseId: warehouse.id,
-      warehouseItemId: id,
-      vendor,
+      quantity: newQty,
       caseCost,
-      casesReceived,
       unitsPerCase,
-      totalUnits,
       costPerUnit,
-      purchaseDate,
-      notes,
-    }).returning();
+      lastPurchaseDate: purchaseDate,
+      lastUpdated: new Date(),
+    })
+    .where(and(eq(warehouseItemsTable.id, id), eq(warehouseItemsTable.accountId, req.account!.id)))
+    .returning();
 
-    const [updated] = await tx
-      .update(warehouseItemsTable)
-      .set({
-        warehouseId: warehouse.id,
-        quantity: sql`${warehouseItemsTable.quantity} + ${totalUnits}`,
-        caseCost,
-        unitsPerCase,
-        costPerUnit,
-        lastPurchaseDate: purchaseDate,
-        lastUpdated: new Date(),
-      })
-      .where(and(eq(warehouseItemsTable.id, id), eq(warehouseItemsTable.accountId, req.account!.id)))
-      .returning();
-    if (!updated) return null;
-
-    await tx.insert(historyTable).values({
-      accountId: req.account!.id,
-      locationId: null,
-      itemId: item.id,
-      itemName: item.name,
-      action: "warehouse_quantity_adjusted",
-      field: "quantity",
-      previousValue: String(item.quantity),
-      newValue: String(updated.quantity),
-      note: notes ? `Purchase received: ${notes}` : "Purchase received",
-      source: "warehouse",
-      performedBy: req.authUser?.username,
-      performedByRole: req.membership?.role ?? req.authUser?.role,
-      location: "Warehouse",
-    });
-
-    return { purchase, updated };
+  await recordWarehouseQuantityHistory({
+    req,
+    item,
+    previousQuantity: item.quantity,
+    newQuantity: newQty,
+    reason: notes ? `Purchase received: ${notes}` : "Purchase received",
   });
 
-  if (!result) { res.status(404).json({ error: "Not found" }); return; }
-  res.json({ purchase: result.purchase, item: serializeItem(result.updated), newQty: result.updated.quantity, unitsAdded: totalUnits });
+  res.json({ purchase, item: serializeItem(updated!), newQty, unitsAdded: totalUnits });
 });
 
 router.post("/warehouse/:id/transfer", requirePermission("transfer_inventory"), async (req, res) => {
@@ -570,45 +537,33 @@ router.post("/warehouse/:id/transfer", requirePermission("transfer_inventory"), 
     if (!assertLocationAccess(req, res, storeItem.location)) return;
   }
 
-  const result = await db.transaction(async (tx) => {
-    const warehouse = whItem.warehouseId ? { id: whItem.warehouseId } : await ensureDefaultWarehouse(req.account!.id);
-    const [updatedWarehouseItem] = await tx.update(warehouseItemsTable)
-      .set({
-        warehouseId: warehouse.id,
-        quantity: sql`${warehouseItemsTable.quantity} - ${unitsTransferred}`,
-        lastUpdated: new Date(),
-      })
-      .where(
-        and(
-          eq(warehouseItemsTable.id, id),
-          eq(warehouseItemsTable.accountId, req.account!.id),
-          sql`${warehouseItemsTable.quantity} >= ${unitsTransferred}`,
-        ),
-      )
-      .returning();
+  const warehouse = whItem.warehouseId ? { id: whItem.warehouseId } : await ensureDefaultWarehouse(req.account!.id);
+  const newWhQty = whItem.quantity - unitsTransferred;
 
-    if (!updatedWarehouseItem) return { type: "insufficient" as const };
+  let resolvedStoreItemId = storeItemId;
+  let transfer: typeof warehouseTransfersTable.$inferSelect;
 
-    let resolvedStoreItemId = storeItemId;
+  await db.transaction(async (tx) => {
+    await tx.update(warehouseItemsTable)
+      .set({ warehouseId: warehouse.id, quantity: newWhQty, lastUpdated: new Date() })
+      .where(and(eq(warehouseItemsTable.id, id), eq(warehouseItemsTable.accountId, req.account!.id)));
+
     if (storeItem) {
-      const [updatedStoreItem] = await tx.update(itemsTable)
-        .set({ quantity: sql`${itemsTable.quantity} + ${unitsTransferred}`, lastUpdated: new Date() })
-        .where(and(eq(itemsTable.id, storeItem.id), eq(itemsTable.accountId, req.account!.id)))
-        .returning();
-      if (!updatedStoreItem) return { type: "store-missing" as const };
-
+      await tx.update(itemsTable)
+        .set({ quantity: storeItem.quantity + unitsTransferred, lastUpdated: new Date() })
+        .where(and(eq(itemsTable.id, storeItem.id), eq(itemsTable.accountId, req.account!.id)));
       await tx.insert(historyTable).values({
         accountId: req.account!.id,
-        locationId: updatedStoreItem.locationId,
-        itemId: updatedStoreItem.id,
-        itemName: updatedStoreItem.name,
+        locationId: storeItem.locationId,
+        itemId: storeItem.id,
+        itemName: storeItem.name,
         action: "quantity_updated",
         field: "quantity",
         previousValue: String(storeItem.quantity),
-        newValue: String(updatedStoreItem.quantity),
+        newValue: String(storeItem.quantity + unitsTransferred),
         note: `Transfer from warehouse: +${unitsTransferred} units`,
         source: "warehouse",
-        location: updatedStoreItem.location,
+        location: storeItem.location,
       });
     } else if (createStoreItem) {
       const [newStoreItem] = await tx.insert(itemsTable).values({
@@ -626,7 +581,25 @@ router.post("/warehouse/:id/transfer", requirePermission("transfer_inventory"), 
       resolvedStoreItemId = newStoreItem!.id;
     }
 
-    const [transfer] = await tx.insert(warehouseTransfersTable).values({
+    if (whItem.quantity !== newWhQty) {
+      await tx.insert(historyTable).values({
+        accountId: req.account!.id,
+        locationId: null,
+        itemId: whItem.id,
+        itemName: whItem.name,
+        action: "warehouse_quantity_adjusted",
+        field: "quantity",
+        previousValue: String(whItem.quantity),
+        newValue: String(newWhQty),
+        note: notes ? `Transfer to ${resolvedStoreLocation.name}: ${notes}` : `Transfer to ${resolvedStoreLocation.name}`,
+        source: "warehouse",
+        performedBy: req.authUser?.username,
+        performedByRole: req.membership?.role ?? req.authUser?.role,
+        location: "Warehouse",
+      });
+    }
+
+    const [inserted] = await tx.insert(warehouseTransfersTable).values({
       accountId: req.account!.id,
       warehouseId: warehouse.id,
       storeLocationId: resolvedStoreLocation.id,
@@ -637,36 +610,10 @@ router.post("/warehouse/:id/transfer", requirePermission("transfer_inventory"), 
       unitsTransferred,
       notes,
     }).returning();
-
-    await tx.insert(historyTable).values({
-      accountId: req.account!.id,
-      locationId: null,
-      itemId: whItem.id,
-      itemName: whItem.name,
-      action: "warehouse_quantity_adjusted",
-      field: "quantity",
-      previousValue: String(whItem.quantity),
-      newValue: String(updatedWarehouseItem.quantity),
-      note: notes ? `Transfer to ${resolvedStoreLocation.name}: ${notes}` : `Transfer to ${resolvedStoreLocation.name}`,
-      source: "warehouse",
-      performedBy: req.authUser?.username,
-      performedByRole: req.membership?.role ?? req.authUser?.role,
-      location: "Warehouse",
-    });
-
-    return { type: "ok" as const, transfer, newWarehouseQty: updatedWarehouseItem.quantity };
+    transfer = inserted!;
   });
 
-  if (result.type === "insufficient") {
-    res.status(409).json({ error: "Warehouse quantity changed before this transfer could be saved. Reload and try again." });
-    return;
-  }
-  if (result.type === "store-missing") {
-    res.status(404).json({ error: "Store item not found" });
-    return;
-  }
-
-  res.json({ transfer: result.transfer, newWarehouseQty: result.newWarehouseQty });
+  res.json({ transfer: transfer!, newWarehouseQty: newWhQty });
 });
 
 export default router;

@@ -4,7 +4,7 @@ import { Layout } from "@/components/layout";
 import { useAuth } from "@/contexts/auth-context";
 import { NoPermissionPage } from "@/components/permission-guard";
 import { getListItemsQueryKey, useListItems } from "@workspace/api-client-react";
-import { useSelectedLocation, LOCATIONS } from "@/contexts/location-context";
+import { useSelectedLocation } from "@/contexts/location-context";
 import { useAIVoice, getAIVoiceSupport, type ListenProgress, type ListenResult, type MicrophonePrecheckResult } from "@/hooks/use-ai-voice";
 import { toast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
@@ -501,7 +501,7 @@ export default function VoiceCheck() {
 
   const items = allItems ?? [];
   const hasItems = items.length > 0;
-  const selectableLocations = locationOptions.length > 0 ? locationOptions.map((location) => location.name) : [...LOCATIONS];
+  const selectableLocations = locationOptions.map((location) => location.name);
   const itemsErrorMessage =
     itemsLoadError instanceof Error
       ? itemsLoadError.message

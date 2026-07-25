@@ -23,7 +23,6 @@ import {
   Map,
   Mic,
   Package,
-  ScanLine,
   Warehouse,
 } from "lucide-react";
 
@@ -99,7 +98,6 @@ export default function Dashboard() {
   });
 
   const canVoice = hasPermission("use_voice_mode");
-  const canScan = hasPermission("scan_barcodes");
   const canWarehouse = hasPermission("view_warehouse");
   const lastCount = data?.lastCountAt ?? null;
   const isWarning = lastCount
@@ -130,14 +128,6 @@ export default function Dashboard() {
       icon: Map,
       path: "/route-sheets",
       enabled: true,
-    },
-    {
-      label: "Barcode Scanner",
-      desc: "Scan product barcodes, verify counts, and route unknown codes for follow-up.",
-      tags: ["Camera", "UPC"],
-      icon: ScanLine,
-      path: "/scan",
-      enabled: canScan,
     },
     {
       label: "AI Insights",

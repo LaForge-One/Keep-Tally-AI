@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq, and, asc, desc, inArray, sql } from "drizzle-orm";
+import { eq, and, asc, desc, inArray } from "drizzle-orm";
 import { z } from "zod";
 import multer from "multer";
 import {
@@ -10,7 +10,6 @@ import {
   itemsTable,
   historyTable,
   locationsTable,
-  warehousesTable,
   type LocationRow,
 } from "@workspace/db";
 import {
@@ -62,124 +61,6 @@ function assertGlobalWarehouseAccess(req: Request, res: Response): boolean {
   if (canViewAllLocations(req)) return true;
   res.status(403).json({ error: "Permission denied for warehouse inventory" });
   return false;
-}
-
-function warehouseSlug(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "warehouse";
-}
-
-function normalizedBarcode(value: string | null | undefined): string | null {
-  const normalized = value?.trim();
-  return normalized ? normalized : null;
-}
-
-async function ensureWarehouseLocation(accountId: number): Promise<LocationRow> {
-  const name = "Main Warehouse";
-  const slug = warehouseSlug(name);
-
-  const [existingBySlug] = await db
-    .select()
-    .from(locationsTable)
-    .where(and(eq(locationsTable.accountId, accountId), eq(locationsTable.slug, slug)))
-    .limit(1);
-  if (existingBySlug) return existingBySlug;
-
-  const [existingByName] = await db
-    .select()
-    .from(locationsTable)
-    .where(and(eq(locationsTable.accountId, accountId), eq(locationsTable.name, name)))
-    .limit(1);
-  if (existingByName) return existingByName;
-
-  const [created] = await db
-    .insert(locationsTable)
-    .values({ accountId, name, slug, status: "active" })
-    .returning();
-  if (!created) throw new Error("Failed to create default warehouse location");
-  return created;
-}
-
-async function ensureDefaultWarehouse(accountId: number) {
-  const [activeWarehouse] = await db
-    .select()
-    .from(warehousesTable)
-    .where(and(eq(warehousesTable.accountId, accountId), eq(warehousesTable.status, "active")))
-    .orderBy(asc(warehousesTable.id))
-    .limit(1);
-  if (activeWarehouse) return activeWarehouse;
-
-  const name = "Main Warehouse";
-  const slug = warehouseSlug(name);
-  const location = await ensureWarehouseLocation(accountId);
-
-  const [existingBySlug] = await db
-    .select()
-    .from(warehousesTable)
-    .where(and(eq(warehousesTable.accountId, accountId), eq(warehousesTable.slug, slug)))
-    .limit(1);
-  if (existingBySlug) {
-    const [updated] = await db
-      .update(warehousesTable)
-      .set({
-        locationId: existingBySlug.locationId ?? location.id,
-        status: "active",
-        updatedAt: new Date(),
-      })
-      .where(and(eq(warehousesTable.accountId, accountId), eq(warehousesTable.id, existingBySlug.id)))
-      .returning();
-    return updated ?? existingBySlug;
-  }
-
-  const [created] = await db
-    .insert(warehousesTable)
-    .values({ accountId, locationId: location.id, name, slug, status: "active" })
-    .returning();
-  if (!created) throw new Error("Failed to create default warehouse");
-  return created;
-}
-
-async function findDestinationStoreItem(
-  accountId: number,
-  location: LocationRow,
-  warehouseItem: typeof warehouseItemsTable.$inferSelect,
-) {
-  if (warehouseItem.productId !== null) {
-    const [byProduct] = await db
-      .select()
-      .from(itemsTable)
-      .where(
-        and(
-          eq(itemsTable.accountId, accountId),
-          eq(itemsTable.locationId, location.id),
-          eq(itemsTable.productId, warehouseItem.productId),
-        ),
-      )
-      .limit(1);
-    if (byProduct) return byProduct;
-  }
-
-  const barcode = normalizedBarcode(warehouseItem.barcode);
-  if (barcode) {
-    const [byBarcode] = await db
-      .select()
-      .from(itemsTable)
-      .where(and(eq(itemsTable.accountId, accountId), eq(itemsTable.locationId, location.id), eq(itemsTable.barcode, barcode)))
-      .limit(1);
-    if (byBarcode) return byBarcode;
-  }
-
-  const [byName] = await db
-    .select()
-    .from(itemsTable)
-    .where(
-      and(
-        eq(itemsTable.accountId, accountId),
-        eq(itemsTable.locationId, location.id),
-        eq(itemsTable.name, warehouseItem.name),
-      ),
-    )
-    .limit(1);
-  return byName ?? null;
 }
 
 async function resolveStoreLocation(
@@ -421,49 +302,21 @@ router.get("/warehouse/:id", requirePermission("view_warehouse"), async (req, re
     .where(and(eq(warehouseItemsTable.id, id), eq(warehouseItemsTable.accountId, req.account!.id)));
   if (!item) { res.status(404).json({ error: "Not found" }); return; }
 
-  const pageSize = 50;
-  const purchasePage = Math.max(1, parseInt(String(req.query.purchasePage ?? "1")) || 1);
-  const transferPage = Math.max(1, parseInt(String(req.query.transferPage ?? "1")) || 1);
-
   const purchases = await db
     .select()
     .from(warehousePurchasesTable)
     .where(and(eq(warehousePurchasesTable.accountId, req.account!.id), eq(warehousePurchasesTable.warehouseItemId, id)))
-    .orderBy(desc(warehousePurchasesTable.purchaseDate), desc(warehousePurchasesTable.createdAt))
-    .limit(pageSize)
-    .offset((purchasePage - 1) * pageSize);
-
-  const allPurchasesForPricing = await db
-    .select({
-      vendor: warehousePurchasesTable.vendor,
-      costPerUnit: warehousePurchasesTable.costPerUnit,
-      totalUnits: warehousePurchasesTable.totalUnits,
-    })
-    .from(warehousePurchasesTable)
-    .where(and(eq(warehousePurchasesTable.accountId, req.account!.id), eq(warehousePurchasesTable.warehouseItemId, id)))
-    .orderBy(desc(warehousePurchasesTable.purchaseDate), desc(warehousePurchasesTable.createdAt));
-
-  const [purchaseCountRow] = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(warehousePurchasesTable)
-    .where(and(eq(warehousePurchasesTable.accountId, req.account!.id), eq(warehousePurchasesTable.warehouseItemId, id)));
+    .orderBy(desc(warehousePurchasesTable.purchaseDate));
 
   const transfers = await db
     .select()
     .from(warehouseTransfersTable)
     .where(and(eq(warehouseTransfersTable.accountId, req.account!.id), eq(warehouseTransfersTable.warehouseItemId, id)))
-    .orderBy(desc(warehouseTransfersTable.createdAt))
-    .limit(pageSize)
-    .offset((transferPage - 1) * pageSize);
-
-  const [transferCountRow] = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(warehouseTransfersTable)
-    .where(and(eq(warehouseTransfersTable.accountId, req.account!.id), eq(warehouseTransfersTable.warehouseItemId, id)));
+    .orderBy(desc(warehouseTransfersTable.createdAt));
 
   // Vendor price analysis
   const vendorMap = new Map<string, { costs: number[]; totalUnits: number }>();
-  for (const p of allPurchasesForPricing) {
+  for (const p of purchases) {
     const existing = vendorMap.get(p.vendor);
     if (existing) {
       existing.costs.push(p.costPerUnit);
@@ -481,7 +334,7 @@ router.get("/warehouse/:id", requirePermission("view_warehouse"), async (req, re
     totalUnits: data.totalUnits,
   }));
 
-  const allCosts = allPurchasesForPricing.map((p) => p.costPerUnit);
+  const allCosts = purchases.map((p) => p.costPerUnit);
   const globalAvgCost = allCosts.length ? allCosts.reduce((a, b) => a + b, 0) / allCosts.length : null;
   const globalLowestCost = allCosts.length ? Math.min(...allCosts) : null;
   const latestCost = allCosts[0] ?? item.costPerUnit ?? null;
@@ -490,148 +343,9 @@ router.get("/warehouse/:id", requirePermission("view_warehouse"), async (req, re
     item: serializeItem(item),
     purchases,
     transfers,
-    pagination: {
-      purchases: {
-        page: purchasePage,
-        pageSize,
-        total: purchaseCountRow?.count ?? 0,
-      },
-      transfers: {
-        page: transferPage,
-        pageSize,
-        total: transferCountRow?.count ?? 0,
-      },
-    },
     vendorPricing,
     pricing: { latest: latestCost, avg: globalAvgCost, lowest: globalLowestCost },
   });
-});
-
-/* ── POST /warehouse ── */
-router.post("/warehouse", requirePermission("edit_warehouse"), async (req, res) => {
-  if (!assertGlobalWarehouseAccess(req, res)) return;
-
-  const schema = z.object({
-    name: z.string().min(1),
-    barcode: z.string().optional(),
-    category: z.string().default("Uncategorized"),
-    quantity: z.number().int().min(0).default(0),
-    minPar: z.number().int().min(0).default(0),
-    maxPar: z.number().int().min(0).default(0),
-    reorderPoint: z.number().int().min(0).default(0),
-    caseCost: z.number().min(0).optional().nullable(),
-    unitsPerCase: z.number().int().min(1).default(1),
-    costPerUnit: z.number().min(0).optional().nullable(),
-    lastPurchaseDate: z.string().optional().nullable(),
-  });
-
-  const parsed = schema.safeParse(req.body);
-  if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return; }
-
-  const data = parsed.data;
-  const costPerUnit = data.costPerUnit ?? (data.caseCost && data.unitsPerCase ? data.caseCost / data.unitsPerCase : undefined);
-
-  const [inserted] = await db.insert(warehouseItemsTable).values({
-    ...data,
-    accountId: req.account!.id,
-    costPerUnit,
-    lastPurchaseDate: data.lastPurchaseDate || undefined,
-  }).returning();
-
-  res.status(201).json(serializeItem(inserted!));
-});
-
-/* ── PUT /warehouse/:id ── */
-router.put("/warehouse/:id", requirePermission("edit_warehouse"), async (req, res) => {
-  if (!assertGlobalWarehouseAccess(req, res)) return;
-
-  const id = parseParamId(req.params.id);
-  if (id === null) { res.status(400).json({ error: "Invalid id" }); return; }
-
-  const schema = z.object({
-    name: z.string().trim().min(1).optional(),
-    barcode: z.string().optional().nullable(),
-    category: z.string().trim().min(1).optional(),
-    quantity: z.number().int().min(0).optional(),
-    minPar: z.number().int().min(0).optional(),
-    maxPar: z.number().int().min(0).optional(),
-    reorderPoint: z.number().int().min(0).optional(),
-    caseCost: z.number().min(0).optional().nullable(),
-    unitsPerCase: z.number().int().min(1).optional(),
-    costPerUnit: z.number().min(0).optional().nullable(),
-    lastPurchaseDate: z.string().optional().nullable(),
-  });
-
-  const parsed = schema.safeParse(req.body);
-  if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return; }
-
-  const [before] = await db
-    .select()
-    .from(warehouseItemsTable)
-    .where(and(eq(warehouseItemsTable.id, id), eq(warehouseItemsTable.accountId, req.account!.id)))
-    .limit(1);
-
-  if (!before) { res.status(404).json({ error: "Not found" }); return; }
-
-  const data = {
-    ...parsed.data,
-    barcode: parsed.data.barcode === undefined ? undefined : parsed.data.barcode?.trim() || null,
-    lastPurchaseDate: parsed.data.lastPurchaseDate === undefined ? undefined : parsed.data.lastPurchaseDate || null,
-  };
-  const updates: Partial<typeof warehouseItemsTable.$inferInsert> = { lastUpdated: new Date() };
-  const changes: Array<{ field: string; from: string; to: string }> = [];
-
-  const setIfChanged = <K extends keyof typeof data>(field: K, column: keyof typeof warehouseItemsTable.$inferInsert = field as keyof typeof warehouseItemsTable.$inferInsert) => {
-    const next = data[field];
-    if (next === undefined) return;
-    const previous = before[column as keyof typeof before];
-    if (next !== previous) {
-      (updates as Record<string, unknown>)[column as string] = next;
-      changes.push({ field: String(column), from: historyValue(previous), to: historyValue(next) });
-    }
-  };
-
-  setIfChanged("name");
-  setIfChanged("barcode");
-  setIfChanged("category");
-  setIfChanged("quantity");
-  setIfChanged("minPar");
-  setIfChanged("maxPar");
-  setIfChanged("reorderPoint");
-  setIfChanged("caseCost");
-  setIfChanged("unitsPerCase");
-  setIfChanged("costPerUnit");
-  setIfChanged("lastPurchaseDate");
-
-  const [updated] = await db
-    .update(warehouseItemsTable)
-    .set(updates)
-    .where(and(eq(warehouseItemsTable.id, id), eq(warehouseItemsTable.accountId, req.account!.id)))
-    .returning();
-
-  if (!updated) { res.status(500).json({ error: "Failed to update warehouse item" }); return; }
-
-  if (changes.length > 0) {
-    await db.insert(historyTable).values(
-      changes.map((change) => ({
-        accountId: req.account!.id,
-        locationId: null,
-        itemId: updated.id,
-        itemName: updated.name,
-        action: "warehouse_update",
-        field: change.field,
-        previousValue: change.from,
-        newValue: change.to,
-        note: "Warehouse item field edited",
-        source: "warehouse",
-        performedBy: req.authUser?.displayName ?? req.authUser?.username ?? null,
-        performedByRole: req.authUser?.role ?? null,
-        location: "Warehouse",
-      })),
-    );
-  }
-
-  res.json(serializeItem(updated));
 });
 
 /* ── DELETE /warehouse/:id ── */
@@ -656,258 +370,6 @@ router.delete("/warehouse/:id", requirePermission("edit_warehouse"), async (req,
 });
 
 /* ── POST /warehouse/:id/receive ── */
-router.post("/warehouse/:id/receive", requirePermission("receive_purchases"), async (req, res) => {
-  if (!assertGlobalWarehouseAccess(req, res)) return;
-
-  const id = parseParamId(req.params.id);
-  if (id === null) { res.status(400).json({ error: "Invalid id" }); return; }
-
-  const schema = z.object({
-    vendor: z.string().min(1),
-    caseCost: z.number().min(0),
-    casesReceived: z.number().int().min(1).default(1),
-    unitsPerCase: z.number().int().min(1).default(1),
-    purchaseDate: z.string(),
-    notes: z.string().optional(),
-  });
-
-  const parsed = schema.safeParse(req.body);
-  if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return; }
-
-  const { vendor, caseCost, casesReceived, unitsPerCase, purchaseDate, notes } = parsed.data;
-  const totalUnits = casesReceived * unitsPerCase;
-  const costPerUnit = caseCost / unitsPerCase;
-
-  const [item] = await db
-    .select()
-    .from(warehouseItemsTable)
-    .where(and(eq(warehouseItemsTable.id, id), eq(warehouseItemsTable.accountId, req.account!.id)));
-  if (!item) { res.status(404).json({ error: "Not found" }); return; }
-
-  const [purchase] = await db.insert(warehousePurchasesTable).values({
-    accountId: req.account!.id,
-    warehouseId: item.warehouseId,
-    warehouseItemId: id,
-    vendor,
-    caseCost,
-    casesReceived,
-    unitsPerCase,
-    totalUnits,
-    costPerUnit,
-    purchaseDate,
-    notes,
-  }).returning();
-
-  const newQty = item.quantity + totalUnits;
-  const [updated] = await db
-    .update(warehouseItemsTable)
-    .set({
-      quantity: newQty,
-      caseCost,
-      unitsPerCase,
-      costPerUnit,
-      lastPurchaseDate: purchaseDate,
-      lastUpdated: new Date(),
-    })
-    .where(and(eq(warehouseItemsTable.id, id), eq(warehouseItemsTable.accountId, req.account!.id)))
-    .returning();
-
-  res.json({ purchase, item: serializeItem(updated!), newQty, unitsAdded: totalUnits });
-});
-
-/* ── POST /warehouse/:id/transfer ── */
-router.post("/warehouse/:id/transfer", requirePermission("transfer_inventory"), async (req, res) => {
-  const id = parseParamId(req.params.id);
-  if (id === null) { res.status(400).json({ error: "Invalid id" }); return; }
-
-  const schema = z.object({
-    storeLocation: z.string().min(1),
-    unitsTransferred: z.number().int().min(1),
-    storeItemId: z.number().int().optional(),
-    createStoreItem: z.boolean().optional().default(false),
-    parLevel: z.number().int().min(0).optional(),
-    notes: z.string().optional(),
-  });
-
-  const parsed = schema.safeParse(req.body);
-  if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return; }
-
-  const { storeLocation, unitsTransferred, storeItemId, createStoreItem, parLevel, notes } = parsed.data;
-  const resolvedStoreLocation = await resolveStoreLocation(req, res, storeLocation);
-  if (!resolvedStoreLocation) return;
-
-  const [whItem] = await db
-    .select()
-    .from(warehouseItemsTable)
-    .where(and(eq(warehouseItemsTable.id, id), eq(warehouseItemsTable.accountId, req.account!.id)))
-    .limit(1);
-  if (!whItem) { res.status(404).json({ error: "Not found" }); return; }
-  if (whItem.quantity < unitsTransferred) {
-    res.status(400).json({ error: `Only ${whItem.quantity} units available in warehouse` });
-    return;
-  }
-
-  let storeItem: typeof itemsTable.$inferSelect | null = null;
-  if (storeItemId) {
-    const [foundStoreItem] = await db
-      .select()
-      .from(itemsTable)
-      .where(and(eq(itemsTable.id, storeItemId), eq(itemsTable.accountId, req.account!.id)));
-    storeItem = foundStoreItem ?? null;
-    if (!storeItem) {
-      res.status(404).json({ error: "Store item not found" });
-      return;
-    }
-    const storeLocationMatches =
-      storeItem.locationId !== null
-        ? storeItem.locationId === resolvedStoreLocation.id
-        : storeItem.location === resolvedStoreLocation.name;
-    if (!storeLocationMatches) {
-      res.status(400).json({ error: "Store item does not belong to the transfer location" });
-      return;
-    }
-    if (!assertLocationAccess(req, res, storeItem.location)) return;
-  } else {
-    storeItem = await findDestinationStoreItem(req.account!.id, resolvedStoreLocation, whItem);
-  }
-
-  if (!storeItem && !createStoreItem) {
-    res.status(409).json({
-      error: "No matching store item exists at this location. Enable create store item to start inventory at this store.",
-    });
-    return;
-  }
-
-  const warehouse = whItem.warehouseId ? { id: whItem.warehouseId } : await ensureDefaultWarehouse(req.account!.id);
-  const result = await db.transaction(async (tx) => {
-    const [updatedWarehouseItem] = await tx.update(warehouseItemsTable)
-      .set({
-        warehouseId: warehouse.id,
-        quantity: sql`${warehouseItemsTable.quantity} - ${unitsTransferred}`,
-        lastUpdated: new Date(),
-      })
-      .where(
-        and(
-          eq(warehouseItemsTable.id, id),
-          eq(warehouseItemsTable.accountId, req.account!.id),
-          sql`${warehouseItemsTable.quantity} >= ${unitsTransferred}`,
-        ),
-      )
-      .returning();
-
-    if (!updatedWarehouseItem) return { type: "insufficient" as const };
-
-    let resolvedStoreItemId = storeItem?.id ?? storeItemId;
-    let destinationStoreItem = storeItem;
-
-    if (destinationStoreItem) {
-      const [updatedStoreItem] = await tx.update(itemsTable)
-        .set({ quantity: sql`${itemsTable.quantity} + ${unitsTransferred}`, lastUpdated: new Date() })
-        .where(and(eq(itemsTable.id, destinationStoreItem.id), eq(itemsTable.accountId, req.account!.id)))
-        .returning();
-      if (!updatedStoreItem) return { type: "store-missing" as const };
-
-      await tx.insert(historyTable).values({
-        accountId: req.account!.id,
-        locationId: updatedStoreItem.locationId,
-        itemId: updatedStoreItem.id,
-        itemName: updatedStoreItem.name,
-        action: "quantity_updated",
-        field: "quantity",
-        previousValue: String(destinationStoreItem.quantity),
-        newValue: String(updatedStoreItem.quantity),
-        note: `Transfer from warehouse: +${unitsTransferred} units`,
-        source: "warehouse",
-        performedBy: req.authUser?.displayName ?? req.authUser?.username ?? null,
-        performedByRole: req.membership?.role ?? req.authUser?.role ?? null,
-        location: updatedStoreItem.location,
-      });
-      destinationStoreItem = updatedStoreItem;
-      resolvedStoreItemId = updatedStoreItem.id;
-    } else if (createStoreItem) {
-      const [newStoreItem] = await tx.insert(itemsTable).values({
-        accountId: req.account!.id,
-        productId: whItem.productId,
-        locationId: resolvedStoreLocation.id,
-        name: whItem.name,
-        category: whItem.category,
-        location: resolvedStoreLocation.name,
-        quantity: unitsTransferred,
-        parLevel: parLevel ?? 0,
-        minQuantity: parLevel ?? 0,
-        maxQuantity: Math.max(parLevel ?? 0, unitsTransferred, (parLevel ?? 0) * 2),
-        barcode: normalizedBarcode(whItem.barcode) ?? undefined,
-      }).returning();
-      if (!newStoreItem) return { type: "store-missing" as const };
-      destinationStoreItem = newStoreItem;
-      resolvedStoreItemId = newStoreItem.id;
-
-      await tx.insert(historyTable).values({
-        accountId: req.account!.id,
-        locationId: newStoreItem.locationId,
-        itemId: newStoreItem.id,
-        itemName: newStoreItem.name,
-        action: "item_created",
-        field: "quantity",
-        previousValue: "0",
-        newValue: String(newStoreItem.quantity),
-        note: `Created by warehouse transfer: +${unitsTransferred} units`,
-        source: "warehouse",
-        performedBy: req.authUser?.displayName ?? req.authUser?.username ?? null,
-        performedByRole: req.membership?.role ?? req.authUser?.role ?? null,
-        location: newStoreItem.location,
-      });
-    }
-
-    const [transfer] = await tx.insert(warehouseTransfersTable).values({
-      accountId: req.account!.id,
-      warehouseId: warehouse.id,
-      storeLocationId: resolvedStoreLocation.id,
-      warehouseItemId: id,
-      warehouseItemName: whItem.name,
-      storeItemId: resolvedStoreItemId,
-      storeLocation: resolvedStoreLocation.name,
-      unitsTransferred,
-      notes,
-    }).returning();
-
-    await tx.insert(historyTable).values({
-      accountId: req.account!.id,
-      locationId: null,
-      itemId: whItem.id,
-      itemName: whItem.name,
-      action: "warehouse_quantity_adjusted",
-      field: "quantity",
-      previousValue: String(whItem.quantity),
-      newValue: String(updatedWarehouseItem.quantity),
-      note: notes ? `Transfer to ${resolvedStoreLocation.name}: ${notes}` : `Transfer to ${resolvedStoreLocation.name}`,
-      source: "warehouse",
-      performedBy: req.authUser?.displayName ?? req.authUser?.username ?? null,
-      performedByRole: req.membership?.role ?? req.authUser?.role ?? null,
-      location: "Warehouse",
-    });
-
-    return {
-      type: "ok" as const,
-      transfer,
-      storeItem: destinationStoreItem,
-      newWarehouseQty: updatedWarehouseItem.quantity,
-    };
-  });
-
-  if (result.type === "insufficient") {
-    res.status(409).json({ error: "Warehouse quantity changed before this transfer could be saved. Reload and try again." });
-    return;
-  }
-  if (result.type === "store-missing") {
-    res.status(404).json({ error: "Store item not found" });
-    return;
-  }
-
-  res.json({ transfer: result.transfer, storeItem: result.storeItem, newWarehouseQty: result.newWarehouseQty });
-});
-
-/* ── GET /warehouse/export/csv ── */
 router.get("/warehouse/export/csv", requirePermission("view_warehouse"), async (req, res) => {
   if (!assertGlobalWarehouseAccess(req, res)) return;
 
@@ -1075,75 +537,4 @@ router.post("/warehouse/import/preview", requirePermission("edit_warehouse"), up
 
   res.json({ headers, detected, totalRows: rows.length, preview });
 });
-
-/* ── POST /warehouse/import/apply ── */
-router.post("/warehouse/import/apply", requirePermission("edit_warehouse"), async (req, res) => {
-  if (!assertGlobalWarehouseAccess(req, res)) return;
-
-  const schema = z.object({
-    items: z.array(z.object({
-      name: z.string().min(1),
-      barcode: z.string().optional().nullable(),
-      category: z.string().default("Uncategorized"),
-      quantity: z.number().int().min(0).default(0),
-      minPar: z.number().int().min(0).default(0),
-      maxPar: z.number().int().min(0).default(0),
-      reorderPoint: z.number().int().min(0).default(0),
-      caseCost: z.number().min(0).optional().nullable(),
-      unitsPerCase: z.number().int().min(1).default(1),
-      costPerUnit: z.number().min(0).optional().nullable(),
-    })),
-    mode: z.enum(["insert", "upsert"]).default("upsert"),
-  });
-
-  const parsed = schema.safeParse(req.body);
-  if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return; }
-
-  const { items, mode } = parsed.data;
-  let inserted = 0;
-  let updated = 0;
-  const existingByBarcode = new Map<string, typeof warehouseItemsTable.$inferSelect>();
-
-  if (mode === "upsert") {
-    const barcodes = Array.from(new Set(items.map((item) => item.barcode).filter((barcode): barcode is string => Boolean(barcode))));
-    if (barcodes.length > 0) {
-      const existingRows = await db
-        .select()
-        .from(warehouseItemsTable)
-        .where(and(eq(warehouseItemsTable.accountId, req.account!.id), inArray(warehouseItemsTable.barcode, barcodes)));
-      for (const row of existingRows) {
-        if (row.barcode) existingByBarcode.set(row.barcode, row);
-      }
-    }
-  }
-
-  for (const item of items) {
-    const costPerUnit = item.costPerUnit ?? (item.caseCost && item.unitsPerCase ? item.caseCost / item.unitsPerCase : undefined) ?? undefined;
-
-    if (mode === "upsert" && item.barcode) {
-      const existing = existingByBarcode.get(item.barcode);
-      if (existing) {
-        const [row] = await db.update(warehouseItemsTable)
-          .set({ ...item, costPerUnit, barcode: item.barcode ?? undefined, lastUpdated: new Date() })
-          .where(and(eq(warehouseItemsTable.id, existing.id), eq(warehouseItemsTable.accountId, req.account!.id)))
-          .returning();
-        if (row?.barcode) existingByBarcode.set(row.barcode, row);
-        updated++;
-        continue;
-      }
-    }
-
-    const [row] = await db.insert(warehouseItemsTable).values({
-      ...item,
-      accountId: req.account!.id,
-      costPerUnit,
-      barcode: item.barcode ?? undefined,
-    }).returning();
-    if (row?.barcode) existingByBarcode.set(row.barcode, row);
-    inserted++;
-  }
-
-  res.json({ inserted, updated, total: items.length });
-});
-
 export default router;

@@ -24,7 +24,7 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { useCurrentUser } from "@/contexts/auth-context";
-import { LOCATIONS } from "@/contexts/location-context";
+import { useSelectedLocation } from "@/contexts/location-context";
 import { useLocation } from "wouter";
 import {
   UserPlus,
@@ -97,6 +97,7 @@ async function apiFetch(url: string, opts?: RequestInit) {
 }
 
 export default function UserManagementPage() {
+  const { locations } = useSelectedLocation();
   const currentUser = useCurrentUser();
   const [, setLocation] = useLocation();
   const { toast } = useToast();
@@ -405,13 +406,13 @@ export default function UserManagementPage() {
             <div className="flex flex-col gap-1.5">
               <Label>Assigned Locations <span className="text-muted-foreground font-normal">(leave empty = all)</span></Label>
               <div className="flex flex-wrap gap-2">
-                {LOCATIONS.map((loc) => (
+                {locations.map((loc) => (
                   <button
-                    key={loc}
+                    key={loc.name}
                     type="button"
-                    onClick={() => toggleLocation(loc, form.assignedLocations, (l) => setForm((f) => ({ ...f, assignedLocations: l })))}
+                    onClick={() => toggleLocation(loc.name, form.assignedLocations, (l) => setForm((f) => ({ ...f, assignedLocations: l })))}
                     className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
-                      form.assignedLocations.includes(loc)
+                      form.assignedLocations.includes(loc.name)
                         ? "bg-primary text-primary-foreground border-primary"
                         : "bg-background border-border text-muted-foreground hover:border-primary/50"
                     }`}
@@ -527,13 +528,13 @@ function EditUserForm({
       <div className="flex flex-col gap-1.5">
         <Label>Assigned Locations <span className="text-muted-foreground font-normal">(empty = all)</span></Label>
         <div className="flex flex-wrap gap-2">
-          {LOCATIONS.map((loc) => (
+          {locations.map((loc) => (
             <button
-              key={loc}
+              key={loc.name}
               type="button"
-              onClick={() => toggleLocation(loc)}
+              onClick={() => toggleLocation(loc.name)}
               className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
-                assignedLocations.includes(loc)
+                assignedLocations.includes(loc.name)
                   ? "bg-primary text-primary-foreground border-primary"
                   : "bg-background border-border text-muted-foreground hover:border-primary/50"
               }`}

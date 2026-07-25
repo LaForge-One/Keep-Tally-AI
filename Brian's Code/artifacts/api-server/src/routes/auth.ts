@@ -3,6 +3,7 @@ import { z } from "zod";
 import { signToken } from "../lib/auth-helpers";
 import { authenticateUser, changeUserPassword } from "../services/auth-service";
 import { requireAuth } from "../middleware/auth";
+import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
 const COOKIE_NAME = "kt_token";
@@ -43,6 +44,8 @@ router.post("/auth/login", async (req, res) => {
   const token = signToken(user.id);
   res.cookie(COOKIE_NAME, token, cookieOptions(req));
 
+  logger.info({ event: "auth.login", username: user.username, userId: user.id }, "user logged in");
+
   res.json({
     user: {
       id: user.id,
@@ -58,6 +61,9 @@ router.post("/auth/login", async (req, res) => {
 
 /* ── POST /auth/logout ── */
 router.post("/auth/logout", (req, res) => {
+  if (req.authUser) {
+    logger.info({ event: "auth.logout", username: req.authUser.username, userId: req.authUser.id }, "user logged out");
+  }
   res.clearCookie(COOKIE_NAME, {
     httpOnly: true,
     sameSite: "lax",

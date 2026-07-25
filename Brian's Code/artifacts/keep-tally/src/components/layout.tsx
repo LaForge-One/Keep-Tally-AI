@@ -13,7 +13,6 @@ import {
   Map,
   Menu,
   Package,
-  ScanLine,
   Search,
   Settings,
   Users,
@@ -34,7 +33,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useSelectedLocation, LOCATIONS } from "@/contexts/location-context";
+import { useSelectedLocation } from "@/contexts/location-context";
 import { useAuth, useCurrentUser } from "@/contexts/auth-context";
 import { useQuery } from "@tanstack/react-query";
 
@@ -265,7 +264,7 @@ export function Layout({ children }: { children: ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [searchValue, setSearchValue] = useState("");
 
-  const { selectedLocation, setSelectedLocation } = useSelectedLocation();
+  const { selectedLocation, setSelectedLocation, locations } = useSelectedLocation();
   const { logout, hasPermission } = useAuth();
   const currentUser = useCurrentUser();
 
@@ -278,12 +277,13 @@ export function Layout({ children }: { children: ReactNode }) {
       (currentUser?.assignedLocations?.length ?? 0) > 1);
   const storeLocationOptions = useMemo(
     () =>
-      LOCATIONS.filter(
-        (loc) =>
+      locations
+        .filter((loc) =>
           hasPermission("view_all_locations") ||
           currentUser?.assignedLocations?.length === 0 ||
-          currentUser?.assignedLocations?.includes(loc),
-      ),
+          currentUser?.assignedLocations?.includes(loc.name),
+        )
+        .map((loc) => loc.name),
     [currentUser?.assignedLocations, hasPermission],
   );
 
@@ -350,9 +350,6 @@ export function Layout({ children }: { children: ReactNode }) {
       section: "Field Work",
     },
     { path: "/route-sheets", label: "Route Sheets", icon: Map },
-    ...(hasPermission("scan_barcodes")
-      ? [{ path: "/scan", label: "Barcode Scanner", icon: ScanLine }]
-      : []),
     {
       path: "/agents",
       label: "Agent Insights",
@@ -493,7 +490,7 @@ export function Layout({ children }: { children: ReactNode }) {
                 setSelectedLocation(
                   val === "__all__"
                     ? null
-                    : (val as (typeof LOCATIONS)[number]),
+                    : val,
                 )
               }
             >

@@ -47,7 +47,7 @@ import {
   Trash2,
   AlertTriangle,
 } from "lucide-react";
-import { LOCATIONS } from "@/contexts/location-context";
+import { useSelectedLocation } from "@/contexts/location-context";
 import { useToast } from "@/hooks/use-toast";
 import { useCurrentUser } from "@/contexts/auth-context";
 import { format } from "date-fns";
@@ -110,6 +110,7 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 export default function OrdersPage() {
+  const { locations } = useSelectedLocation();
   const [, navigate] = useWouterLocation();
   const { toast } = useToast();
   const currentUser = useCurrentUser();
@@ -495,9 +496,9 @@ export default function OrdersPage() {
                       <SelectValue placeholder="Choose a location…" />
                     </SelectTrigger>
                     <SelectContent>
-                      {LOCATIONS.map((loc) => (
-                        <SelectItem key={loc} value={loc}>
-                          {loc}
+                      {locations.map((loc) => (
+                        <SelectItem key={loc.name} value={loc.name}>
+                          {loc.name}
                         </SelectItem>
                       ))}
                     </SelectContent>

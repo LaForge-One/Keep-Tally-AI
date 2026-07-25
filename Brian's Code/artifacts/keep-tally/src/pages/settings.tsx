@@ -460,9 +460,9 @@ export default function SettingsPage() {
           <CardContent className="space-y-5">
             <div className="flex flex-col gap-3 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-xs leading-relaxed text-sky-800 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <p className="font-bold">Notification preferences are active</p>
+                <p className="font-bold">Notification backend is in development</p>
                 <p className="mt-0.5">
-                  In-app events are stored now. Email channels remain provider-ready and will stay pending until a transactional provider is configured.
+                  Preference controls are shown for design review. Save and event generation will be enabled once the backend is deployed.
                 </p>
               </div>
               <Badge variant={emailProviderConfigured ? "default" : "secondary"} className="w-fit">
@@ -554,10 +554,10 @@ export default function SettingsPage() {
                   Generated event lists remain capped at 50 records for readability.
                 </p>
               </div>
-              <Button variant="outline" disabled={!canEditSettings || notificationsGenerating} onClick={generateNotifications}>
+              <Button variant="outline" disabled={true} title="Notification backend not yet implemented">
                 {notificationsGenerating ? "Refreshing..." : "Generate Events"}
               </Button>
-              <Button disabled={!canEditSettings || notificationsSaving} onClick={saveNotificationPreferences}>
+              <Button disabled={true} title="Notification backend not yet implemented">
                 {notificationsSaving ? "Saving..." : "Save Preferences"}
               </Button>
             </div>
@@ -594,9 +594,9 @@ export default function SettingsPage() {
 
             <div className="grid gap-3 sm:grid-cols-3">
               {[
-                ["1", "Preference storage and in-app event list", "Complete"],
-                ["2", "Admin controls and unread notification UI", "Complete"],
-                ["3", "Digest generator with email-ready delivery status", "Complete"],
+                ["1", "Preference storage and in-app event list", "Backend pending"],
+                ["2", "Admin controls and unread notification UI", "Backend pending"],
+                ["3", "Digest generator with email-ready delivery status", "Backend pending"],
               ].map(([step, label, status]) => (
                 <div key={step} className="rounded-lg border border-border bg-muted/20 p-3">
                   <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Phase {step}</p>

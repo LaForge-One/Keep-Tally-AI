@@ -28,12 +28,7 @@ const TTS_MODEL = process.env.AI_TTS_MODEL ?? "gpt-4o-mini-tts";
 const TRANSCRIBE_MODEL = process.env.AI_TRANSCRIBE_MODEL ?? "gpt-4o-mini-transcribe";
 const DEFAULT_TTS_INSTRUCTIONS =
   process.env.AI_TTS_INSTRUCTIONS ??
-  [
-    "Use a smooth, soft, feminine-presenting voice with a warm and reassuring tone.",
-    "Sound natural and human, not robotic or announcer-like.",
-    "Use gentle pacing, light upward inflection, and clear inventory-friendly diction.",
-    "Keep responses brief, calm, and easy to understand for a busy inventory operator.",
-  ].join(" ");
+  "Use a warm, polite, natural human voice. Keep prompts brief, calm, and easy to understand for an inventory operator.";
 
 export type AudioFormat = "wav" | "mp3" | "webm" | "mp4" | "ogg" | "unknown";
 
@@ -115,12 +110,12 @@ export async function convertToWav(audioBuffer: Buffer): Promise<Buffer> {
  */
 export async function ensureCompatibleFormat(
   audioBuffer: Buffer
-): Promise<{ buffer: Buffer; format: "wav" | "mp3"; detected: AudioFormat; converted: boolean }> {
+): Promise<{ buffer: Buffer; format: "wav" | "mp3" }> {
   const detected = detectAudioFormat(audioBuffer);
-  if (detected === "wav") return { buffer: audioBuffer, format: "wav", detected, converted: false };
-  if (detected === "mp3") return { buffer: audioBuffer, format: "mp3", detected, converted: false };
+  if (detected === "wav") return { buffer: audioBuffer, format: "wav" };
+  if (detected === "mp3") return { buffer: audioBuffer, format: "mp3" };
   const wavBuffer = await convertToWav(audioBuffer);
-  return { buffer: wavBuffer, format: "wav", detected, converted: true };
+  return { buffer: wavBuffer, format: "wav" };
 }
 
 /** Voice Chat: audio-in, audio-out. */
@@ -232,14 +227,13 @@ export async function textToSpeechStream(
 /** Speech-to-Text using the configured transcription model. */
 export async function speechToText(
   audioBuffer: Buffer,
-  format: "wav" | "mp3" | "webm" = "wav",
-  prompt = "Inventory terms may include product names, counts, route names, warehouse names, par levels, theft, spoilage, comp, damaged, and missing from bin.",
+  format: "wav" | "mp3" | "webm" = "wav"
 ): Promise<string> {
   const file = await toFile(audioBuffer, `audio.${format}`);
   const response = await openai.audio.transcriptions.create({
     file,
     model: TRANSCRIBE_MODEL,
-    prompt,
+    prompt: "Inventory terms may include product names, counts, route names, warehouse names, par levels, theft, spoilage, comp, damaged, and missing from bin.",
   });
   return response.text;
 }

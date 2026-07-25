@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { LOCATIONS } from "@/contexts/location-context";
+import { useSelectedLocation } from "@/contexts/location-context";
 import {
   ArrowLeft,
   Package,
@@ -29,7 +29,7 @@ import {
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const VENDORS = ["Costco", "Sam's Club", "Vistar", "Walmart", "Pepsi Corp", "Other"];
-const ALL_LOCATIONS = [...LOCATIONS, "Warehouse"] as const;
+
 const LIST_PAGE_SIZE = 50;
 
 type WarehouseItem = {
@@ -278,8 +278,9 @@ function ReceiveForm({ itemId, onReceived }: { itemId: number; onReceived: () =>
 /* ── Transfer Form ── */
 function TransferForm({ item, onTransferred }: { item: WarehouseItem; onTransferred: () => void }) {
   const { toast } = useToast();
+  const { locations } = useSelectedLocation();
   const [form, setForm] = useState({
-    storeLocation: LOCATIONS[0] as string,
+    storeLocation: "",
     unitsTransferred: "1",
     createStoreItem: false,
     parLevel: "0",
@@ -330,10 +331,10 @@ function TransferForm({ item, onTransferred }: { item: WarehouseItem; onTransfer
       <div>
         <label className="text-xs font-semibold text-muted-foreground block mb-1">Destination Store</label>
         <div className="grid grid-cols-3 gap-1.5">
-          {LOCATIONS.map((loc) => (
-            <button key={loc} onClick={() => set("storeLocation", loc)}
-              className={`text-xs rounded-xl px-2 py-2 font-medium border transition-colors text-center ${form.storeLocation === loc ? "border-primary bg-primary/5 text-primary font-bold" : "border-border bg-background hover:border-primary/40"}`}>
-              {loc}
+          {locations.map((loc) => (
+            <button key={loc.name} onClick={() => set("storeLocation", loc.name)}
+              className={`text-xs rounded-xl px-2 py-2 font-medium border transition-colors text-center ${form.storeLocation === loc.name ? "border-primary bg-primary/5 text-primary font-bold" : "border-border bg-background hover:border-primary/40"}`}>
+              {loc.name}
             </button>
           ))}
         </div>

@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ClipboardList, Edit, Plus, Route, Trash2 } from "lucide-react";
-import { LOCATIONS } from "@/contexts/location-context";
+import { useSelectedLocation } from "@/contexts/location-context";
 import { useToast } from "@/hooks/use-toast";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -155,6 +155,7 @@ function NumberInput(props: { value: number; onChange: (value: number) => void; 
 }
 
 export default function RouteSheetsPage() {
+  const { locations } = useSelectedLocation();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -399,7 +400,7 @@ export default function RouteSheetsPage() {
 
                   <div className="grid gap-3 md:grid-cols-6">
                     <label className="space-y-1"><span className="text-xs font-medium">Order</span><NumberInput value={stop.routeOrder} onChange={(value) => updateStop(index, { routeOrder: value })} /></label>
-                    <label className="space-y-1 md:col-span-2"><span className="text-xs font-medium">Location</span><Select value={stop.locationName || undefined} onValueChange={(value) => updateStop(index, { locationName: value })}><SelectTrigger><SelectValue placeholder="Select location" /></SelectTrigger><SelectContent>{LOCATIONS.map((loc) => <SelectItem key={loc} value={loc}>{loc}</SelectItem>)}</SelectContent></Select></label>
+                    <label className="space-y-1 md:col-span-2"><span className="text-xs font-medium">Location</span><Select value={stop.locationName || undefined} onValueChange={(value) => updateStop(index, { locationName: value })}><SelectTrigger><SelectValue placeholder="Select location" /></SelectTrigger><SelectContent>{locations.map((loc) => <SelectItem key={loc.name} value={loc.name}>{loc.name}</SelectItem>)}</SelectContent></Select></label>
                     <label className="space-y-1 md:col-span-3"><span className="text-xs font-medium">Address</span><Input value={stop.address} onChange={(e) => updateStop(index, { address: e.target.value })} /></label>
                     <label className="space-y-1 md:col-span-2"><span className="text-xs font-medium">Contact</span><Input value={stop.contact} onChange={(e) => updateStop(index, { contact: e.target.value })} /></label>
                     <label className="space-y-1 md:col-span-4"><span className="text-xs font-medium">Machine types</span><Input value={stop.machineTypes} onChange={(e) => updateStop(index, { machineTypes: e.target.value })} placeholder="Cooler, snack, coffee" /></label>

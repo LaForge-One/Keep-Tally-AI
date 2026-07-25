@@ -11,7 +11,7 @@ import {
   USER_ROLES,
   usersTable,
 } from "@workspace/db";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { hashPassword } from "../lib/auth-helpers";
 import { requireAccount, requireActiveMembership } from "../middleware/auth";
 
@@ -273,6 +273,19 @@ router.patch("/users/:id", async (req, res) => {
     return;
   }
 
+  // Last-admin guard: prevent demoting or deactivating the last active admin
+  const isRemovingAdminAccess =
+    (parsed.data.role !== undefined && parsed.data.role !== "admin" && before.role === "admin") ||
+    (parsed.data.active === false && before.role === "admin" && before.active);
+  if (isRemovingAdminAccess) {
+    const [adminCount] = await db.select({ count: sql`count(*)::int` }).from(usersTable)
+      .where(and(eq(usersTable.accountId, req.account!.id), eq(usersTable.role, "admin"), eq(usersTable.active, true)));
+    if ((adminCount?.count as number) <= 1) {
+      res.status(400).json({ error: "Cannot remove admin access from the last active admin account" });
+      return;
+    }
+  }
+
   let locationIds: number[] | undefined;
   const updates = { ...parsed.data };
   if (updates.assignedLocations !== undefined) {
@@ -355,6 +368,17 @@ router.delete("/users/:id", async (req, res) => {
   if (id === null) { res.status(400).json({ error: "Invalid id" }); return; }
 
   if (req.authUser?.id === id) { res.status(400).json({ error: "Cannot delete your own account" }); return; }
+
+  // Last-admin guard: prevent removing the last active admin
+  const [target] = await db.select().from(usersTable).where(and(eq(usersTable.id, id), eq(usersTable.accountId, req.account!.id))).limit(1);
+  if (target?.role === "admin" && target?.active) {
+    const [adminCount] = await db.select({ count: sql`count(*)::int` }).from(usersTable)
+      .where(and(eq(usersTable.accountId, req.account!.id), eq(usersTable.role, "admin"), eq(usersTable.active, true)));
+    if ((adminCount?.count as number) <= 1) {
+      res.status(400).json({ error: "Cannot delete the last active admin account" });
+      return;
+    }
+  }
 
   const [deleted] = await db
     .delete(usersTable)
