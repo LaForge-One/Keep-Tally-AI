@@ -1,4 +1,11 @@
-import { Router, type CookieOptions, type IRouter, type Request } from "express";
+import {
+  Router,
+  type CookieOptions,
+  type IRouter,
+  type Request,
+  type Response,
+  type NextFunction,
+} from "express";
 import { z } from "zod";
 import { signToken } from "../lib/auth-helpers";
 import { authenticateUser, changeUserPassword } from "../services/auth-service";
@@ -16,12 +23,35 @@ function shouldUseSecureCookies(req: Request): boolean {
 
 function cookieOptions(req: Request): CookieOptions {
   return {
-  httpOnly: true,
-  sameSite: "lax" as const,
-  maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    httpOnly: true,
+    sameSite: "lax" as const,
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     secure: shouldUseSecureCookies(req),
-  path: "/",
+    path: "/",
   };
+}
+
+export function requirePasswordNotExpired(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) {
+  const user = req.authUser;
+  if (!user) {
+    next();
+    return;
+  }
+  if (
+    (user as unknown as { mustChangePassword?: boolean }).mustChangePassword ===
+    true
+  ) {
+    res.status(403).json({
+      error: "Password change required before continuing",
+      code: "MUST_CHANGE_PASSWORD",
+    });
+    return;
+  }
+  next();
 }
 
 /* ── POST /auth/login ── */
@@ -31,7 +61,10 @@ router.post("/auth/login", async (req, res) => {
     password: z.string().min(1),
   });
   const parsed = schema.safeParse(req.body);
-  if (!parsed.success) { res.status(400).json({ error: "Username and password required" }); return; }
+  if (!parsed.success) {
+    res.status(400).json({ error: "Username and password required" });
+    return;
+  }
 
   const { username, password } = parsed.data;
   const user = await authenticateUser(username, password);
@@ -86,18 +119,29 @@ router.get("/auth/me", requireAuth, async (req, res) => {
 router.post("/auth/change-password", requireAuth, async (req, res) => {
   const schema = z.object({
     currentPassword: z.string().min(1),
-    newPassword: z.string().min(6),
+    newPassword: z
+      .string()
+      .min(10, "New password must be at least 10 characters"),
   });
   const parsed = schema.safeParse(req.body);
-  if (!parsed.success) { res.status(400).json({ error: "Invalid input" }); return; }
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid input" });
+    return;
+  }
 
   const result = await changeUserPassword(
     req.authUser!.id,
     parsed.data.currentPassword,
     parsed.data.newPassword,
   );
-  if (result === "not_found") { res.status(404).json({ error: "User not found" }); return; }
-  if (result === "invalid_current_password") { res.status(401).json({ error: "Current password is incorrect" }); return; }
+  if (result === "not_found") {
+    res.status(404).json({ error: "User not found" });
+    return;
+  }
+  if (result === "invalid_current_password") {
+    res.status(401).json({ error: "Current password is incorrect" });
+    return;
+  }
 
   res.json({ ok: true });
 });

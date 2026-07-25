@@ -2,6 +2,7 @@ name: keeptally-dev
 
 services:
   keeptally-dev:
+    network_mode: host
     build:
       context: .
       dockerfile: Dockerfile
@@ -12,11 +13,6 @@ services:
     restart: unless-stopped
     env_file:
       - ${KEEP_TALLY_DEV_ENV_FILE:-.env.vps-dev}
-    ports:
-      # Bind to localhost so dev traffic must pass through SSH, Webuzo/nginx, or Cloudflare Access.
-      - "127.0.0.1:${KEEP_TALLY_DEV_HOST_PORT:-3100}:3000"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     healthcheck:
       test:
         [

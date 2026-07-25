@@ -10,16 +10,31 @@ const store = new Map<string, WindowEntry>();
 const WINDOW_MS = 60_000;
 const MAX_REQUESTS = 20;
 
+// Evict expired entries every 5 minutes to prevent unbounded Map growth.
+// Without this, a single-process deployment accumulates one entry per unique
+// client IP seen over the lifetime of the process.
+const EVICTION_INTERVAL_MS = 5 * 60_000;
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of store) {
+    if (now >= entry.resetAt) store.delete(key);
+  }
+}, EVICTION_INTERVAL_MS).unref();
+
 function getClientKey(req: Request): string {
   const forwarded = req.headers["x-forwarded-for"];
   const ip =
     typeof forwarded === "string"
       ? forwarded.split(",")[0].trim()
-      : req.socket.remoteAddress ?? "unknown";
+      : (req.socket.remoteAddress ?? "unknown");
   return ip;
 }
 
-export function commandRateLimit(req: Request, res: Response, next: NextFunction): void {
+export function commandRateLimit(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): void {
   const key = getClientKey(req);
   const now = Date.now();
 

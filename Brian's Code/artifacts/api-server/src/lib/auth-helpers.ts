@@ -1,6 +1,7 @@
-import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import { randomBytes } from "node:crypto";
+import { createRequire } from "node:module";
+import type { SignOptions } from "jsonwebtoken";
 import {
   db,
   accountsTable,
@@ -13,7 +14,10 @@ import {
   type UserRole,
   type PermissionKey,
 } from "@workspace/db";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
+
+const require = createRequire(import.meta.url);
+const jwt = require("jsonwebtoken") as typeof import("jsonwebtoken");
 
 const JWT_SECRET = process.env.SESSION_SECRET;
 const JWT_EXPIRES = "7d";
@@ -23,7 +27,9 @@ if (!JWT_SECRET) {
   if (process.env.NODE_ENV === "production") {
     throw new Error("SESSION_SECRET is required in production");
   }
-  console.warn("[auth] SESSION_SECRET is not set; using an unsafe development-only secret");
+  console.warn(
+    "[auth] SESSION_SECRET is not set; using an unsafe development-only secret",
+  );
 }
 
 function jwtSecret(): string {
@@ -33,7 +39,9 @@ function jwtSecret(): string {
 /* ── JWT ─────────────────────────────────────────────────── */
 
 export function signToken(userId: number): string {
-  return jwt.sign({ sub: userId }, jwtSecret(), { expiresIn: JWT_EXPIRES });
+  return jwt.sign({ sub: userId }, jwtSecret(), {
+    expiresIn: JWT_EXPIRES,
+  } satisfies SignOptions);
 }
 
 export function verifyToken(token: string): { sub: number } | null {
@@ -67,13 +75,18 @@ export async function hashPassword(plain: string): Promise<string> {
   return bcrypt.hash(plain, 12);
 }
 
-export async function comparePassword(plain: string, hash: string): Promise<boolean> {
+export async function comparePassword(
+  plain: string,
+  hash: string,
+): Promise<boolean> {
   return bcrypt.compare(plain, hash);
 }
 
 /* ── Permission loader ───────────────────────────────────── */
 
-function normalizePermissionKeys(rows: Array<{ enabled: boolean; permissionKey: string }>): Set<PermissionKey> {
+function normalizePermissionKeys(
+  rows: Array<{ enabled: boolean; permissionKey: string }>,
+): Set<PermissionKey> {
   return new Set(
     rows
       .filter((r) => r.enabled)
@@ -82,12 +95,20 @@ function normalizePermissionKeys(rows: Array<{ enabled: boolean; permissionKey: 
   );
 }
 
-export async function getPermissionsForRole(role: UserRole, accountId?: number): Promise<Set<PermissionKey>> {
+export async function getPermissionsForRole(
+  role: UserRole,
+  accountId?: number,
+): Promise<Set<PermissionKey>> {
   if (accountId !== undefined) {
     const accountRows = await db
       .select()
       .from(rolePermissionsTable)
-      .where(and(eq(rolePermissionsTable.accountId, accountId), eq(rolePermissionsTable.role, role)));
+      .where(
+        and(
+          eq(rolePermissionsTable.accountId, accountId),
+          eq(rolePermissionsTable.role, role),
+        ),
+      );
 
     if (accountRows.length > 0) {
       return normalizePermissionKeys(accountRows);
@@ -97,7 +118,12 @@ export async function getPermissionsForRole(role: UserRole, accountId?: number):
   const rows = await db
     .select()
     .from(rolePermissionsTable)
-    .where(and(isNull(rolePermissionsTable.accountId), eq(rolePermissionsTable.role, role)));
+    .where(
+      and(
+        isNull(rolePermissionsTable.accountId),
+        eq(rolePermissionsTable.role, role),
+      ),
+    );
 
   if (rows.length === 0) {
     // Fall back to defaults (role_permissions table not yet seeded for this role)
@@ -133,21 +159,31 @@ export async function seedDefaultData() {
   }
   const seededPermissions = await seedAccountRolePermissions(defaultAccount.id);
   if (seededPermissions > 0) {
-    console.log(`[auth] Seeded ${seededPermissions} default account role permissions`);
+    console.log(
+      `[auth] Seeded ${seededPermissions} default account role permissions`,
+    );
   }
 
   // Seed default admin user if no users exist
-  const existing = await db.select({ id: usersTable.id }).from(usersTable).limit(1);
+  const existing = await db
+    .select({ id: usersTable.id })
+    .from(usersTable)
+    .limit(1);
   if (existing.length === 0) {
     const bootstrapPassword = process.env.INITIAL_ADMIN_PASSWORD;
     if (!bootstrapPassword) {
       if (process.env.NODE_ENV === "production") {
-        throw new Error("INITIAL_ADMIN_PASSWORD is required to bootstrap the first admin user");
+        throw new Error(
+          "INITIAL_ADMIN_PASSWORD is required to bootstrap the first admin user",
+        );
       }
-      console.warn("[auth] INITIAL_ADMIN_PASSWORD is not set; generating a development-only admin password");
+      console.warn(
+        "[auth] INITIAL_ADMIN_PASSWORD is not set; generating a development-only admin password",
+      );
     }
 
-    const generatedPassword = bootstrapPassword ?? randomBytes(18).toString("base64url");
+    const generatedPassword =
+      bootstrapPassword ?? randomBytes(18).toString("base64url");
     const passwordHash = await hashPassword(generatedPassword);
     await db.insert(usersTable).values({
       username: "admin",
@@ -166,26 +202,35 @@ export async function seedDefaultData() {
   }
 
   const users = await db.select().from(usersTable);
+
+  // Batch-load memberships once instead of checking one user at a time.
+  const userIds = users.map((user) => user.id);
+  const existingMemberships =
+    userIds.length > 0
+      ? await db
+          .select({
+            userId: accountMembershipsTable.userId,
+            accountId: accountMembershipsTable.accountId,
+          })
+          .from(accountMembershipsTable)
+          .where(inArray(accountMembershipsTable.userId, userIds))
+      : [];
+
+  const membershipSet = new Set(
+    existingMemberships.map(
+      (membership) => `${membership.accountId}:${membership.userId}`,
+    ),
+  );
+
   for (const user of users) {
     if (!user.accountId) continue;
-    const [membership] = await db
-      .select({ id: accountMembershipsTable.id })
-      .from(accountMembershipsTable)
-      .where(
-        and(
-          eq(accountMembershipsTable.accountId, user.accountId),
-          eq(accountMembershipsTable.userId, user.id),
-        ),
-      )
-      .limit(1);
+    if (membershipSet.has(`${user.accountId}:${user.id}`)) continue;
 
-    if (!membership) {
-      await db.insert(accountMembershipsTable).values({
-        accountId: user.accountId,
-        userId: user.id,
-        role: user.role,
-        active: user.active,
-      });
-    }
+    await db.insert(accountMembershipsTable).values({
+      accountId: user.accountId,
+      userId: user.id,
+      role: user.role,
+      active: user.active,
+    });
   }
 }

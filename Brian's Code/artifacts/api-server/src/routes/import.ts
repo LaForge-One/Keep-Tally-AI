@@ -2,16 +2,35 @@ import { Router, type IRouter, type Request } from "express";
 import multer from "multer";
 import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
-import { db, historyTable, itemsTable, locationsTable, type ItemRow, type LocationRow } from "@workspace/db";
-import { canAccessLocation, canViewAllLocations, requireAccount, requireActiveMembership } from "../middleware/auth";
+import {
+  db,
+  historyTable,
+  itemsTable,
+  locationsTable,
+  type ItemRow,
+  type LocationRow,
+} from "@workspace/db";
+import {
+  canAccessLocation,
+  canViewAllLocations,
+  requireAccount,
+  requireActiveMembership,
+  requirePermission,
+} from "../middleware/auth";
 
 const router: IRouter = Router();
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+});
 
 router.use(requireAccount, requireActiveMembership);
 
 /* ── CSV parser ── */
-function parseCSV(text: string): { headers: string[]; rows: Record<string, string>[] } {
+function parseCSV(text: string): {
+  headers: string[];
+  rows: Record<string, string>[];
+} {
   const lines = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
   if (lines.length < 2) return { headers: [], rows: [] };
 
@@ -22,8 +41,12 @@ function parseCSV(text: string): { headers: string[]; rows: Record<string, strin
     for (let i = 0; i < line.length; i++) {
       const ch = line[i]!;
       if (ch === '"') {
-        if (inQuotes && line[i + 1] === '"') { current += '"'; i++; }
-        else { inQuotes = !inQuotes; }
+        if (inQuotes && line[i + 1] === '"') {
+          current += '"';
+          i++;
+        } else {
+          inQuotes = !inQuotes;
+        }
       } else if (ch === "," && !inQuotes) {
         result.push(current.trim());
         current = "";
@@ -35,25 +58,68 @@ function parseCSV(text: string): { headers: string[]; rows: Record<string, strin
     return result;
   }
 
-  const headers = splitCSVLine(lines[0]!).map((h) => h.replace(/^"|"$/g, "").trim());
+  const headers = splitCSVLine(lines[0]!).map((h) =>
+    h.replace(/^"|"$/g, "").trim(),
+  );
   const rows: Record<string, string>[] = [];
 
   for (let i = 1; i < lines.length; i++) {
     const line = lines[i]!.trim();
     if (!line) continue;
-    const values = splitCSVLine(line).map((v) => v.replace(/^"|"$/g, "").trim());
+    const values = splitCSVLine(line).map((v) =>
+      v.replace(/^"|"$/g, "").trim(),
+    );
     const row: Record<string, string> = {};
-    headers.forEach((h, idx) => { row[h] = values[idx] ?? ""; });
+    headers.forEach((h, idx) => {
+      row[h] = values[idx] ?? "";
+    });
     rows.push(row);
   }
   return { headers, rows };
 }
 
 /* ── Column auto-detector ── */
-const ITEM_ALIASES = ["name", "product name", "item name", "product description", "description", "product", "item", "sku name"];
-const BARCODE_ALIASES = ["barcode", "upc", "sku", "ean", "gtin", "product code", "item code", "item number"];
-const QTY_ALIASES = ["sold", "qty sold", "units sold", "quantity sold", "quantity", "qty", "sales qty", "unit sales", "count"];
-const LOCATION_ALIASES = ["location", "market", "site", "store", "machine", "machine name", "site name", "market name"];
+const ITEM_ALIASES = [
+  "name",
+  "product name",
+  "item name",
+  "product description",
+  "description",
+  "product",
+  "item",
+  "sku name",
+];
+const BARCODE_ALIASES = [
+  "barcode",
+  "upc",
+  "sku",
+  "ean",
+  "gtin",
+  "product code",
+  "item code",
+  "item number",
+];
+const QTY_ALIASES = [
+  "sold",
+  "qty sold",
+  "units sold",
+  "quantity sold",
+  "quantity",
+  "qty",
+  "sales qty",
+  "unit sales",
+  "count",
+];
+const LOCATION_ALIASES = [
+  "location",
+  "market",
+  "site",
+  "store",
+  "machine",
+  "machine name",
+  "site name",
+  "market name",
+];
 const DATE_ALIASES = ["date", "sale date", "transaction date", "period", "day"];
 
 function findColumn(headers: string[], aliases: string[]): string | null {
@@ -75,7 +141,10 @@ function findColumn(headers: string[], aliases: string[]): string | null {
 
 /* ── Fuzzy item matcher ── */
 function normalizeName(name: string): string {
-  return name.toLowerCase().replace(/[^a-z0-9\s]/g, "").trim();
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, "")
+    .trim();
 }
 
 function normalizeBarcode(value: string): string {
@@ -86,14 +155,19 @@ function barcodeDigits(value: string): string {
   return value.replace(/\D/g, "");
 }
 
-function findBestMatch(query: string, items: ItemRow[], barcode?: string | null): ItemRow | null {
+function findBestMatch(
+  query: string,
+  items: ItemRow[],
+  barcode?: string | null,
+): ItemRow | null {
   const normalizedBarcode = normalizeBarcode(barcode ?? "");
   const numericBarcode = barcodeDigits(barcode ?? "");
   if (normalizedBarcode || numericBarcode) {
     const exactBarcode = items.find((item) => {
       const itemBarcode = item.barcode ?? "";
       return (
-        (normalizedBarcode && normalizeBarcode(itemBarcode) === normalizedBarcode) ||
+        (normalizedBarcode &&
+          normalizeBarcode(itemBarcode) === normalizedBarcode) ||
         (numericBarcode && barcodeDigits(itemBarcode) === numericBarcode)
       );
     });
@@ -111,8 +185,13 @@ function findBestMatch(query: string, items: ItemRow[], barcode?: string | null)
     const name = normalizeName(item.name);
     if (name === q) return item; // exact match
     if (name.includes(q) || q.includes(name)) {
-      const score = (Math.min(name.length, q.length) / Math.max(name.length, q.length)) * 100;
-      if (score > bestScore) { bestScore = score; bestItem = item; }
+      const score =
+        (Math.min(name.length, q.length) / Math.max(name.length, q.length)) *
+        100;
+      if (score > bestScore) {
+        bestScore = score;
+        bestItem = item;
+      }
       continue;
     }
     const iWords = name.split(/\s+/).filter((w) => w.length > 1);
@@ -121,7 +200,10 @@ function findBestMatch(query: string, items: ItemRow[], barcode?: string | null)
       if (iWords.some((iw) => iw.includes(qw) || qw.includes(iw))) matchCount++;
     }
     const score = qWords.length > 0 ? (matchCount / qWords.length) * 80 : 0;
-    if (score > bestScore && score >= 40) { bestScore = score; bestItem = item; }
+    if (score > bestScore && score >= 40) {
+      bestScore = score;
+      bestItem = item;
+    }
   }
 
   return bestScore >= 40 ? bestItem : null;
@@ -137,7 +219,11 @@ function allowedLocationIds(req: Request): number[] {
 
 function canAccessItem(req: Request, item: ItemRow): boolean {
   if (canSeeAllLocations(req)) return true;
-  if (item.locationId !== null && allowedLocationIds(req).includes(item.locationId)) return true;
+  if (
+    item.locationId !== null &&
+    allowedLocationIds(req).includes(item.locationId)
+  )
+    return true;
   return canAccessLocation(req, item.location);
 }
 
@@ -145,19 +231,33 @@ function filterAccessibleItems(req: Request, items: ItemRow[]) {
   return items.filter((item) => canAccessItem(req, item));
 }
 
-async function findAccountLocationsByName(req: Request, names: string[]): Promise<Map<string, LocationRow>> {
-  const uniqueNames = [...new Set(names.map((name) => name.trim()).filter(Boolean))];
+async function findAccountLocationsByName(
+  req: Request,
+  names: string[],
+): Promise<Map<string, LocationRow>> {
+  const uniqueNames = [
+    ...new Set(names.map((name) => name.trim()).filter(Boolean)),
+  ];
   if (uniqueNames.length === 0) return new Map();
 
   const rows = await db
     .select()
     .from(locationsTable)
-    .where(and(eq(locationsTable.accountId, req.account!.id), inArray(locationsTable.name, uniqueNames)));
+    .where(
+      and(
+        eq(locationsTable.accountId, req.account!.id),
+        inArray(locationsTable.name, uniqueNames),
+      ),
+    );
 
   return new Map(rows.map((row) => [row.name, row]));
 }
 
-async function validateCsvLocations(req: Request, rows: Record<string, string>[], locationCol: string | null): Promise<string | null> {
+async function validateCsvLocations(
+  req: Request,
+  rows: Record<string, string>[],
+  locationCol: string | null,
+): Promise<string | null> {
   if (!locationCol) return null;
 
   const csvLocations = rows
@@ -169,20 +269,32 @@ async function validateCsvLocations(req: Request, rows: Record<string, string>[]
     const location = (row[locationCol] ?? "").trim();
     if (!location) continue;
     const accountLocation = accountLocations.get(location);
-    if (!accountLocation || accountLocation.status !== "active") return location;
-    if (!canSeeAllLocations(req) && !allowedLocationIds(req).includes(accountLocation.id) && !canAccessLocation(req, location)) {
+    if (!accountLocation || accountLocation.status !== "active")
+      return location;
+    if (
+      !canSeeAllLocations(req) &&
+      !allowedLocationIds(req).includes(accountLocation.id) &&
+      !canAccessLocation(req, location)
+    ) {
       return location;
     }
   }
   return null;
 }
 
-async function validateFallbackLocation(req: Request, location: string): Promise<string | null> {
+async function validateFallbackLocation(
+  req: Request,
+  location: string,
+): Promise<string | null> {
   if (!location) return null;
   const accountLocations = await findAccountLocationsByName(req, [location]);
   const accountLocation = accountLocations.get(location);
   if (!accountLocation || accountLocation.status !== "active") return location;
-  if (!canSeeAllLocations(req) && !allowedLocationIds(req).includes(accountLocation.id) && !canAccessLocation(req, location)) {
+  if (
+    !canSeeAllLocations(req) &&
+    !allowedLocationIds(req).includes(accountLocation.id) &&
+    !canAccessLocation(req, location)
+  ) {
     return location;
   }
   return null;
@@ -213,7 +325,9 @@ router.post("/import/preview", upload.single("file"), async (req, res) => {
   const locationCol = findColumn(headers, LOCATION_ALIASES);
   const dateCol = findColumn(headers, DATE_ALIASES);
   if (!itemCol && !barcodeCol) {
-    res.status(400).json({ error: "Could not detect item name or barcode column" });
+    res
+      .status(400)
+      .json({ error: "Could not detect item name or barcode column" });
     return;
   }
 
@@ -222,24 +336,43 @@ router.post("/import/preview", upload.single("file"), async (req, res) => {
     return;
   }
 
-  const fallbackLocation = typeof req.body?.location === "string" ? req.body.location.trim() : "";
-  const deniedLocation = await validateCsvLocations(req, rows, locationCol) ?? (!locationCol ? await validateFallbackLocation(req, fallbackLocation) : null);
+  const fallbackLocation =
+    typeof req.body?.location === "string" ? req.body.location.trim() : "";
+  const deniedLocation =
+    (await validateCsvLocations(req, rows, locationCol)) ??
+    (!locationCol
+      ? await validateFallbackLocation(req, fallbackLocation)
+      : null);
   if (deniedLocation) {
-    res.status(403).json({ error: "Permission denied for one or more import locations" });
+    res
+      .status(403)
+      .json({ error: "Permission denied for one or more import locations" });
     return;
   }
 
   // Aggregate by item name (sum quantities across rows)
-  const aggregated = new Map<string, { csvName: string; barcode: string | null; qty: number; locations: Set<string>; dates: string[] }>();
+  const aggregated = new Map<
+    string,
+    {
+      csvName: string;
+      barcode: string | null;
+      qty: number;
+      locations: Set<string>;
+      dates: string[];
+    }
+  >();
   for (const row of rows) {
     const rawName = itemCol ? (row[itemCol] ?? "").trim() : "";
     const rawBarcode = barcodeCol ? (row[barcodeCol] ?? "").trim() : "";
     const rawQty = qtyCol ? (row[qtyCol] ?? "0").replace(/[^0-9.-]/g, "") : "0";
-    const rawLoc = locationCol ? (row[locationCol] ?? "").trim() : fallbackLocation;
+    const rawLoc = locationCol
+      ? (row[locationCol] ?? "").trim()
+      : fallbackLocation;
     const rawDate = dateCol ? (row[dateCol] ?? "").trim() : "";
     const csvName = rawName || rawBarcode;
 
-    if (!csvName || (rawName.trim().toLowerCase() === "totals" && !rawBarcode)) continue;
+    if (!csvName || (rawName.trim().toLowerCase() === "totals" && !rawBarcode))
+      continue;
     const qty = parseFloat(rawQty) || 0;
     if (qty <= 0) continue;
 
@@ -265,9 +398,10 @@ router.post("/import/preview", upload.single("file"), async (req, res) => {
     .from(itemsTable)
     .where(eq(itemsTable.accountId, req.account!.id));
   const allItems = filterAccessibleItems(req, accountItems);
-  const scopedItems = fallbackLocation && !locationCol
-    ? allItems.filter((item) => itemMatchesLocation(item, fallbackLocation))
-    : allItems;
+  const scopedItems =
+    fallbackLocation && !locationCol
+      ? allItems.filter((item) => itemMatchesLocation(item, fallbackLocation))
+      : allItems;
 
   const matched: object[] = [];
   const unmatched: object[] = [];
@@ -301,7 +435,13 @@ router.post("/import/preview", upload.single("file"), async (req, res) => {
 
   res.json({
     headers,
-    detectedColumns: { item: itemCol, barcode: barcodeCol, qty: qtyCol, location: locationCol, date: dateCol },
+    detectedColumns: {
+      item: itemCol,
+      barcode: barcodeCol,
+      qty: qtyCol,
+      location: locationCol,
+      date: dateCol,
+    },
     totalRows: rows.length,
     matched,
     unmatched,
@@ -309,115 +449,159 @@ router.post("/import/preview", upload.single("file"), async (req, res) => {
 });
 
 /* ── POST /import/apply ── */
-router.post("/import/apply", async (req, res) => {
-  const schema = z.object({
-    mode: z.enum(["deduct", "par"]),
-    restockDays: z.number().int().min(1).max(365).optional().default(7),
-    items: z.array(
-      z.object({
-        itemId: z.number().int(),
-        qtySold: z.number().int().min(0),
-        override: z.boolean().optional(),
-      })
-    ),
-  });
+router.post(
+  "/import/apply",
+  requirePermission("edit_store_inventory"),
+  async (req, res) => {
+    const schema = z.object({
+      mode: z.enum(["deduct", "par"]),
+      restockDays: z.number().int().min(1).max(365).optional().default(7),
+      items: z.array(
+        z.object({
+          itemId: z.number().int(),
+          qtySold: z.number().int().min(0),
+          override: z.boolean().optional(),
+        }),
+      ),
+    });
 
-  const parsed = schema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.flatten() });
-    return;
-  }
-
-  const { mode, restockDays, items } = parsed.data;
-  const results: object[] = [];
-  const itemIds = [...new Set(items.map((item) => item.itemId))];
-  const existingItems = itemIds.length > 0
-    ? await db
-        .select()
-        .from(itemsTable)
-        .where(and(eq(itemsTable.accountId, req.account!.id), inArray(itemsTable.id, itemIds)))
-    : [];
-
-  if (existingItems.length !== itemIds.length) {
-    res.status(403).json({ error: "Permission denied for one or more item locations" });
-    return;
-  }
-
-  for (const item of existingItems) {
-    if (!canAccessItem(req, item)) {
-      res.status(403).json({ error: "Permission denied for one or more item locations" });
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.flatten() });
       return;
     }
-  }
 
-  for (const { itemId, qtySold } of items) {
-    const [item] = await db
-      .select()
-      .from(itemsTable)
-      .where(and(eq(itemsTable.id, itemId), eq(itemsTable.accountId, req.account!.id)));
-    if (!item) continue;
+    const { mode, restockDays, items } = parsed.data;
+    const results: object[] = [];
+    const itemIds = [...new Set(items.map((item) => item.itemId))];
+    const existingItems =
+      itemIds.length > 0
+        ? await db
+            .select()
+            .from(itemsTable)
+            .where(
+              and(
+                eq(itemsTable.accountId, req.account!.id),
+                inArray(itemsTable.id, itemIds),
+              ),
+            )
+        : [];
 
-    if (mode === "deduct") {
-      const newQty = Math.max(0, item.quantity - qtySold);
-      await db.update(itemsTable)
-        .set({ quantity: newQty, lastUpdated: new Date() })
-        .where(and(eq(itemsTable.id, itemId), eq(itemsTable.accountId, req.account!.id)));
-      if (newQty !== item.quantity) {
-        await db.insert(historyTable).values({
-          accountId: req.account!.id,
-          locationId: item.locationId,
-          itemId: item.id,
-          itemName: item.name,
-          action: "import",
-          field: "quantity",
-          previousValue: String(item.quantity),
-          newValue: String(newQty),
-          note: `CSV import deducted ${qtySold} units`,
-          source: "import",
-          performedBy: req.authUser?.displayName ?? null,
-          performedByRole: req.authUser?.role ?? null,
-          location: item.location,
-        });
+    if (existingItems.length !== itemIds.length) {
+      res
+        .status(403)
+        .json({ error: "Permission denied for one or more item locations" });
+      return;
+    }
+
+    for (const item of existingItems) {
+      if (!canAccessItem(req, item)) {
+        res
+          .status(403)
+          .json({ error: "Permission denied for one or more item locations" });
+        return;
       }
-      results.push({ itemId, itemName: item.name, previousQty: item.quantity, newQty, change: newQty - item.quantity });
+    }
 
-    } else if (mode === "par") {
-      // Weekly velocity -> minimum = velocity x restockDays, maximum = two cycles.
-      const weeklyVelocity = qtySold / 7;
-      const suggestedPar = Math.ceil(weeklyVelocity * restockDays);
-      const suggestedMax = Math.max(suggestedPar, suggestedPar * 2, item.quantity);
-      if (suggestedPar > 0) {
-        await db.update(itemsTable)
-          .set({
-            parLevel: suggestedPar,
-            minQuantity: suggestedPar,
-            maxQuantity: suggestedMax,
-            lastUpdated: new Date(),
-          })
-          .where(and(eq(itemsTable.id, itemId), eq(itemsTable.accountId, req.account!.id)));
-        if (suggestedPar !== item.minQuantity || suggestedMax !== item.maxQuantity) {
+    const itemById = new Map(existingItems.map((item) => [item.id, item]));
+
+    for (const { itemId, qtySold } of items) {
+      const item = itemById.get(itemId);
+      if (!item) continue;
+
+      if (mode === "deduct") {
+        const newQty = Math.max(0, item.quantity - qtySold);
+        await db
+          .update(itemsTable)
+          .set({ quantity: newQty, lastUpdated: new Date() })
+          .where(
+            and(
+              eq(itemsTable.id, itemId),
+              eq(itemsTable.accountId, req.account!.id),
+            ),
+          );
+        if (newQty !== item.quantity) {
           await db.insert(historyTable).values({
             accountId: req.account!.id,
             locationId: item.locationId,
             itemId: item.id,
             itemName: item.name,
             action: "import",
-            field: "stockRange",
-            previousValue: `${item.minQuantity}-${item.maxQuantity}`,
-            newValue: `${suggestedPar}-${suggestedMax}`,
-            note: `CSV import calculated min/max stock from ${qtySold} sold over ${restockDays} restock days`,
+            field: "quantity",
+            previousValue: String(item.quantity),
+            newValue: String(newQty),
+            note: `CSV import deducted ${qtySold} units`,
             source: "import",
             performedBy: req.authUser?.displayName ?? null,
             performedByRole: req.authUser?.role ?? null,
             location: item.location,
           });
         }
-        results.push({ itemId, itemName: item.name, previousMin: item.minQuantity, newMin: suggestedPar, previousMax: item.maxQuantity, newMax: suggestedMax });
+        results.push({
+          itemId,
+          itemName: item.name,
+          previousQty: item.quantity,
+          newQty,
+          change: newQty - item.quantity,
+        });
+      } else if (mode === "par") {
+        // Weekly velocity -> minimum = velocity x restockDays, maximum = two cycles.
+        const weeklyVelocity = qtySold / 7;
+        const suggestedPar = Math.ceil(weeklyVelocity * restockDays);
+        const suggestedMax = Math.max(
+          suggestedPar,
+          suggestedPar * 2,
+          item.quantity,
+        );
+        if (suggestedPar > 0) {
+          await db
+            .update(itemsTable)
+            .set({
+              parLevel: suggestedPar,
+              minQuantity: suggestedPar,
+              maxQuantity: suggestedMax,
+              lastUpdated: new Date(),
+            })
+            .where(
+              and(
+                eq(itemsTable.id, itemId),
+                eq(itemsTable.accountId, req.account!.id),
+              ),
+            );
+          if (
+            suggestedPar !== item.minQuantity ||
+            suggestedMax !== item.maxQuantity
+          ) {
+            await db.insert(historyTable).values({
+              accountId: req.account!.id,
+              locationId: item.locationId,
+              itemId: item.id,
+              itemName: item.name,
+              action: "import",
+              field: "stockRange",
+              previousValue: `${item.minQuantity}-${item.maxQuantity}`,
+              newValue: `${suggestedPar}-${suggestedMax}`,
+              note: `CSV import calculated min/max stock from ${qtySold} sold over ${restockDays} restock days`,
+              source: "import",
+              performedBy: req.authUser?.displayName ?? null,
+              performedByRole: req.authUser?.role ?? null,
+              location: item.location,
+            });
+          }
+          results.push({
+            itemId,
+            itemName: item.name,
+            previousMin: item.minQuantity,
+            newMin: suggestedPar,
+            previousMax: item.maxQuantity,
+            newMax: suggestedMax,
+          });
+        }
       }
     }
-  }
 
-  res.json({ mode, applied: results.length, results });
-});
+    res.json({ mode, applied: results.length, results });
+  },
+);
 
 export default router;
